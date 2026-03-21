@@ -1,0 +1,664 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useAppStore, ChatMessage, ProjectUseCase } from '../store/useAppStore';
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  Send,
+  Mic,
+  Sparkles,
+  ArrowLeft,
+  Box,
+  Image as ImageIcon,
+  RefreshCw,
+  Check,
+  ChevronRight,
+  Download,
+  Share2,
+  Edit3,
+  User,
+  Bot,
+  Loader2,
+  SlidersHorizontal,
+  Paperclip,
+  X,
+} from 'lucide-react';
+import { ArdyaWordmark } from '../components/ArdyaWordmark';
+
+const ModelViewer = 'model-viewer' as any;
+
+const CONCEPT_IMAGES = [
+  '/Human_Avatar_Dhruv_Chaturvedi_img.png',
+  '/Lamborgini_image.png',
+] as const;
+
+const MODEL_FOR_IMAGE: Record<string, string> = {
+  '/Human_Avatar_Dhruv_Chaturvedi_img.png': '/Human_Avatar_Dhruv_Chaturvedi_model.glb',
+  '/Lamborgini_image.png': '/models/lamborghini_basic_pbr.glb',
+};
+
+const SUGGESTED_PROMPTS = [
+  'Product hero: white sneakers on neutral studio — AR try-on for ecommerce',
+  'Showroom car config: lime sports car — place in driveway via WebAR',
+  'Corporate avatar: professional bust for virtual meetings & AR name card',
+  'Retail display: compact robot mascot — sustainability, no physical sample run',
+];
+
+function startSpeechRecognition(
+  onText: (t: string) => void,
+  onErr: (msg: string) => void
+) {
+  const W = window as Window & { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any };
+  const SR = W.SpeechRecognition || W.webkitSpeechRecognition;
+  if (!SR) {
+    onErr('Speech recognition needs Chrome or Edge (desktop), or allow the mic permission.');
+    return;
+  }
+  const rec = new SR();
+  rec.lang = 'en-US';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  rec.onresult = (e: { results: { 0: { 0: { transcript: string } } } }) => {
+    const t = e.results[0]?.[0]?.transcript?.trim();
+    if (t) onText(t);
+  };
+  rec.onerror = (e: { error: string }) => {
+    console.warn(e);
+    onErr(e.error === 'not-allowed' ? 'Microphone blocked — allow mic in the browser bar.' : e.error);
+  };
+  rec.start();
+}
+
+export default function ProjectChat() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { projects, chatHistory, addChatMessage, updateProject } = useAppStore();
+  const project = projects.find((p) => p.id === id);
+
+  const [input, setInput] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isGenerating3D, setIsGenerating3D] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState('Meshy AI');
+  const [isProviderOpen, setIsProviderOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [projectName, setProjectName] = useState('');
+  const [categoryTag, setCategoryTag] = useState('');
+  const [gen, setGen] = useState({
+    imageCount: 2, // 1–4
+    modelCount: 1,
+    poly: 'medium' as 'low' | 'medium' | 'high',
+  });
+
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const modelInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const currentMessages = chatHistory[id || ''] || [];
+
+  const providers = [
+    { name: 'Meshy AI', icon: Sparkles, desc: 'High-quality 3D textures & models' },
+    { name: 'Hyper3D', icon: Box, desc: 'Fastest text-to-3D generation' },
+    { name: 'SAM 3D', icon: Bot, desc: 'Segment Anything for 3D' },
+    { name: 'Telles AI', icon: RefreshCw, desc: 'Microsoft Research 3D engine' },
+  ];
+
+  useEffect(() => {
+    if (!project) return;
+    setProjectName(project.name);
+    setCategoryTag(project.category || '');
+  }, [project]);
+
+  useEffect(() => {
+    if (!project) return;
+    if (!project.useCase) setOnboardingOpen(true);
+  }, [project]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [currentMessages]);
+
+  if (!project) return <div className="p-10">Project not found.</div>;
+
+  const handleSend = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!input.trim() || isGenerating) return;
+
+    const userMessage: ChatMessage = {
+      id: Math.random().toString(36).substr(2, 9),
+      role: 'user',
+      content: `[${gen.poly} poly · ${gen.imageCount} images · ${gen.modelCount} model(s)] ${input}`,
+    };
+    addChatMessage(id!, userMessage);
+    const currentInput = input;
+    setInput('');
+    setIsGenerating(true);
+
+    const imgs = CONCEPT_IMAGES.slice(0, Math.min(4, Math.max(1, gen.imageCount)));
+
+    setTimeout(() => {
+      const aiMessage: ChatMessage = {
+        id: Math.random().toString(36).substr(2, 9),
+        role: 'assistant',
+        content: `ARdya · ${selectedProvider}: concept batch for “${currentInput.slice(0, 80)}…”. Pick one to build a GLB (${gen.poly} poly target).`,
+        images: [...imgs],
+      };
+      addChatMessage(id!, aiMessage);
+      setIsGenerating(false);
+    }, 2000);
+  };
+
+  const handleSelectImage = (img: string) => {
+    setIsGenerating3D(true);
+
+    setTimeout(() => {
+      const modelUrl = MODEL_FOR_IMAGE[img] || '/Human_Avatar_Dhruv_Chaturvedi_model.glb';
+      setIsGenerating3D(false);
+
+      const aiMessage: ChatMessage = {
+        id: Math.random().toString(36).substr(2, 9),
+        role: 'assistant',
+        content: `ARdya: your GLB is ready (${gen.poly} poly target). Open in AR Studio or publish.`,
+        modelUrl: modelUrl,
+      };
+      addChatMessage(id!, aiMessage);
+
+      updateProject(id!, {
+        modelUrl: modelUrl,
+        modelDataUrl: undefined,
+        thumbnailUrl: img,
+        status: 'draft',
+      });
+    }, 3000);
+  };
+
+  const saveProjectName = () => {
+    const t = projectName.trim();
+    if (t && t !== project.name) updateProject(id!, { name: t });
+  };
+
+  const setUseCase = (uc: ProjectUseCase) => {
+    const cat = categoryTag.trim();
+    updateProject(id!, { useCase: uc, ...(cat ? { category: cat } : {}) });
+    setOnboardingOpen(false);
+  };
+
+  const onMic = () => {
+    startSpeechRecognition(
+      (t) => setInput((prev) => (prev ? `${prev} ${t}` : t)),
+      (err) => alert(err)
+    );
+  };
+
+  return (
+    <div className="h-screen flex bg-[#030014] text-white overflow-hidden relative">
+      <AnimatePresence>
+        {onboardingOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] bg-black/85 backdrop-blur-md flex items-center justify-center p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.96, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              className="max-w-lg w-full rounded-3xl border border-white/10 bg-[#0a0a0a] p-8 shadow-2xl"
+            >
+              <div className="mb-6">
+                <ArdyaWordmark className="text-xl" />
+                <span className="text-white/40 text-sm ml-2">by VisiARise</span>
+              </div>
+              <h2 className="text-xl font-bold mb-2">How will you use ARdya?</h2>
+              <p className="text-sm text-white/50 mb-6">
+                We&apos;ll tune defaults (categories, prompts). You can upload your own image or GLB next.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(
+                  [
+                    ['game', 'Game / realtime'],
+                    ['company', 'Company / team'],
+                    ['freelance', 'Freelance client'],
+                    ['business', 'Business / brand'],
+                    ['product', 'Physical product / SKU'],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setUseCase(k)}
+                    className="py-3 px-4 rounded-2xl bg-white/5 border border-white/10 text-left text-sm hover:border-brand-primary/50 hover:bg-brand-primary/5 transition-all"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-6 flex gap-3">
+                <input
+                  value={categoryTag}
+                  onChange={(e) => setCategoryTag(e.target.value)}
+                  placeholder="Category tag (e.g. footwear, automotive)"
+                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cat = categoryTag.trim();
+                    updateProject(id!, { useCase: 'business', ...(cat ? { category: cat } : {}) });
+                    setOnboardingOpen(false);
+                  }}
+                  className="text-xs text-white/40 underline"
+                >
+                  Skip
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="absolute top-0 left-1/4 w-96 h-96 bg-brand-primary/10 blur-[120px] rounded-full pointer-events-none" />
+      <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-500/10 blur-[120px] rounded-full pointer-events-none" />
+
+      <aside className="w-72 border-r border-white/5 bg-black/40 backdrop-blur-2xl flex flex-col shrink-0 hidden lg:flex relative z-10">
+        <div className="p-6 border-b border-white/5">
+          <Link
+            to="/dashboard"
+            className="flex items-center gap-2 text-white/40 hover:text-white transition-colors mb-6 group"
+          >
+            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+            <span className="text-[10px] font-bold uppercase tracking-widest">Back to Dashboard</span>
+          </Link>
+          <h2 className="text-sm font-bold tracking-tight mb-1">{project.name}</h2>
+          <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">ARdya · Project</p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-6">
+          <section>
+            <h3 className="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-4 px-2">
+              Generated Models
+            </h3>
+            <div className="space-y-2">
+              {project.modelUrl ? (
+                <div className="p-3 rounded-2xl bg-white/5 border border-white/10 group cursor-pointer hover:border-brand-primary/50 transition-all">
+                  <div className="aspect-square rounded-xl bg-black/40 mb-3 overflow-hidden">
+                    <img
+                      src={project.thumbnailUrl || '/Human_Avatar_Dhruv_Chaturvedi_img.png'}
+                      alt="Model"
+                      className="w-full h-full object-cover opacity-50 group-hover:opacity-100 transition-opacity"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-white/60">model.glb</span>
+                    <Download className="w-3 h-3 text-white/20 group-hover:text-brand-primary transition-colors" />
+                  </div>
+                </div>
+              ) : (
+                <div className="p-8 rounded-2xl border border-dashed border-white/5 flex flex-col items-center justify-center text-center">
+                  <Box className="w-6 h-6 text-white/10 mb-2" />
+                  <p className="text-[10px] text-white/20 font-bold uppercase tracking-widest">No models yet</p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-4 px-2">
+              Reference Images
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              {['/Shoes.png', '/robot_white.png', '/drone-generated.png'].map((src) => (
+                <div
+                  key={src}
+                  className="aspect-square rounded-xl bg-white/5 border border-white/10 overflow-hidden group cursor-pointer"
+                >
+                  <img
+                    src={src}
+                    alt=""
+                    className="w-full h-full object-cover opacity-40 group-hover:opacity-100 transition-opacity"
+                  />
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                className="aspect-square rounded-xl border border-dashed border-white/10 flex items-center justify-center hover:bg-white/5 transition-colors"
+              >
+                <ImageIcon className="w-4 h-4 text-white/20" />
+              </button>
+            </div>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const url = URL.createObjectURL(f);
+                updateProject(id!, { thumbnailUrl: url });
+              }}
+            />
+          </section>
+        </div>
+
+        <div className="p-4 border-t border-white/5">
+          <button
+            type="button"
+            onClick={() => navigate(`/studio/${id}`)}
+            className="w-full py-4 rounded-2xl bg-brand-primary text-black text-[10px] font-bold uppercase tracking-widest hover:bg-brand-primary/90 transition-all flex items-center justify-center gap-2 shadow-lg shadow-brand-primary/20"
+          >
+            <Edit3 className="w-3 h-3" />
+            Open AR Studio
+          </button>
+        </div>
+      </aside>
+
+      <main className="flex-1 flex flex-col relative z-10 bg-black/20 backdrop-blur-sm min-w-0">
+        <header className="min-h-16 flex flex-wrap items-center justify-between gap-4 px-6 py-3 border-b border-white/5 bg-black/40 backdrop-blur-xl z-20">
+          <div className="flex items-center gap-4 min-w-0">
+            <Link to="/dashboard" className="p-2 hover:bg-white/5 rounded-full transition-colors lg:hidden">
+              <ArrowLeft className="w-5 h-5 text-white/40" />
+            </Link>
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-2">
+                <ArdyaWordmark />
+                <span className="text-[10px] text-white/35 uppercase tracking-widest hidden sm:inline">LLM</span>
+              </div>
+              <input
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                onBlur={saveProjectName}
+                className="bg-transparent border-none outline-none text-sm font-semibold text-white/90 max-w-[200px] md:max-w-xs truncate"
+                title="Rename project"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsProviderOpen(!isProviderOpen)}
+                className="flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 border border-white/10 hover:border-brand-primary/50 transition-all group"
+              >
+                <div className="w-2 h-2 rounded-full bg-brand-primary shadow-[0_0_10px_rgba(119,67,219,0.5)]" />
+                <span className="text-[10px] font-bold uppercase tracking-widest">{selectedProvider}</span>
+                <ChevronRight className={`w-3 h-3 text-white/20 transition-transform ${isProviderOpen ? 'rotate-90' : ''}`} />
+              </button>
+              <AnimatePresence>
+                {isProviderOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute top-full left-0 mt-2 w-64 bg-[#0A0A0A] border border-white/10 rounded-2xl shadow-2xl p-2 z-50 overflow-hidden"
+                  >
+                    <div className="px-3 py-2 border-b border-white/5 mb-2">
+                      <p className="text-[10px] font-bold text-white/20 uppercase tracking-widest">Select AI Engine</p>
+                    </div>
+                    {providers.map((p) => (
+                      <button
+                        key={p.name}
+                        type="button"
+                        onClick={() => {
+                          setSelectedProvider(p.name);
+                          setIsProviderOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${selectedProvider === p.name ? 'bg-brand-primary/10 text-brand-primary' : 'hover:bg-white/5 text-white/60'}`}
+                      >
+                        <p.icon className="w-4 h-4" />
+                        <div className="text-left">
+                          <p className="text-[10px] font-bold uppercase tracking-widest">{p.name}</p>
+                          <p className="text-[9px] text-white/40">{p.desc}</p>
+                        </div>
+                        {selectedProvider === p.name && <Check className="w-3 h-3 ml-auto" />}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            <button type="button" className="p-2 rounded-full hover:bg-white/5 text-white/40 hover:text-white">
+              <Share2 className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-primary/10 border border-brand-primary/20">
+              <div className="w-1.5 h-1.5 rounded-full bg-brand-primary animate-pulse" />
+              <span className="text-[10px] font-bold text-brand-primary uppercase tracking-widest">Live</span>
+            </div>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-8 scroll-smooth">
+          <div className="max-w-3xl mx-auto space-y-12 py-10">
+            <div className="flex gap-6">
+              <div className="w-10 h-10 rounded-2xl bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
+                <ArdyaWordmark className="text-[11px]" />
+              </div>
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <h3 className="text-lg font-bold tracking-tight">Welcome to ARdya</h3>
+                  <p className="text-sm leading-relaxed text-white/60 max-w-xl">
+                    Turn prompts or reference images into AR-ready GLBs. Use the gear in the composer for image count,
+                    model count, and poly budget — same bar as your prompt (like Veo-style controls).
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {SUGGESTED_PROMPTS.map((p, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setInput(p)}
+                      className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-[10px] font-medium text-white/50 hover:text-white hover:border-brand-primary/50 hover:bg-brand-primary/5 transition-all text-left max-w-full"
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {currentMessages.map((msg) => (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                key={msg.id}
+                className={`flex gap-6 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+              >
+                <div
+                  className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-white/10 border border-white/10' : 'bg-white/10 border border-white/10'}`}
+                >
+                  {msg.role === 'user' ? (
+                    <User className="w-5 h-5 text-white/60" />
+                  ) : (
+                    <ArdyaWordmark className="text-[10px]" />
+                  )}
+                </div>
+                <div className={`space-y-6 max-w-[85%] ${msg.role === 'user' ? 'text-right' : ''}`}>
+                  <div
+                    className={`p-6 rounded-[2rem] text-sm leading-relaxed ${msg.role === 'user' ? 'bg-brand-primary/10 text-brand-primary border border-brand-primary/20' : 'bg-white/5 text-white/80 border border-white/5'}`}
+                  >
+                    {msg.content}
+                  </div>
+
+                  {msg.images && (
+                    <div className="grid grid-cols-2 gap-4">
+                      {msg.images.map((img, i) => (
+                        <div
+                          key={i}
+                          className="relative group rounded-3xl overflow-hidden border border-white/10 aspect-square bg-white/5 shadow-xl"
+                        >
+                          <img src={img} alt="Generated" className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-all duration-500 backdrop-blur-sm flex flex-col items-center justify-center gap-3 p-6 translate-y-4 group-hover:translate-y-0">
+                            <button
+                              type="button"
+                              onClick={() => handleSelectImage(img)}
+                              className="w-full py-3 bg-brand-primary text-black text-[10px] font-bold uppercase tracking-widest rounded-xl hover:bg-brand-primary/90 transition-all flex items-center justify-center gap-2"
+                            >
+                              <Box className="w-4 h-4" />
+                              Generate 3D
+                            </button>
+                            <button
+                              type="button"
+                              className="w-full py-3 bg-white/10 text-white text-[10px] font-bold uppercase tracking-widest rounded-xl hover:bg-white/20 transition-all flex items-center justify-center gap-2"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              Refine Concept
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {msg.modelUrl && (
+                    <div className="rounded-[2.5rem] border border-white/10 bg-white/5 overflow-hidden shadow-2xl">
+                      <div className="aspect-square relative group">
+                        <ModelViewer
+                          src={msg.modelUrl}
+                          camera-controls
+                          auto-rotate
+                          shadow-intensity="1"
+                          style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                        />
+                        <div className="absolute bottom-6 left-6 right-6 flex gap-3 opacity-0 group-hover:opacity-100 transition-all translate-y-4 group-hover:translate-y-0">
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/studio/${id}`)}
+                            className="flex-1 py-3 rounded-2xl bg-white text-black text-[10px] font-bold uppercase tracking-widest hover:bg-white/90 transition-all flex items-center justify-center gap-2 shadow-xl"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                            AR Studio
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/ar/${id}`)}
+                            className="flex-1 py-3 rounded-2xl bg-brand-primary text-black text-[10px] font-bold uppercase tracking-widest hover:bg-brand-primary/90 transition-all flex items-center justify-center gap-2 shadow-xl"
+                          >
+                            <Box className="w-4 h-4" />
+                            Publish AR
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+
+            {(isGenerating || isGenerating3D) && (
+              <div className="flex gap-6">
+                <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center shrink-0">
+                  <ArdyaWordmark className="text-[10px]" />
+                </div>
+                <div className="p-6 rounded-[2rem] bg-white/5 border border-white/5 flex items-center gap-4">
+                  <Loader2 className="w-5 h-5 animate-spin text-brand-primary" strokeWidth={1.5} />
+                  <span className="text-sm text-white/40 italic">
+                    {isGenerating ? `${selectedProvider} is thinking…` : `Building GLB (${gen.poly})…`}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        <div className="p-6 md:p-8 border-t border-white/5 bg-black/40 backdrop-blur-xl">
+          <div className="max-w-3xl mx-auto">
+            <form onSubmit={handleSend} className="relative group">
+              <div className="absolute -inset-1 bg-gradient-to-r from-brand-primary/20 to-brand-secondary/20 blur-2xl rounded-[3rem] opacity-0 group-focus-within:opacity-100 transition-all duration-500" />
+              <div className="relative flex items-center gap-2 bg-white/5 border border-white/10 rounded-[2.5rem] p-2 md:p-3 focus-within:border-brand-primary/50 transition-all backdrop-blur-md flex-wrap">
+                <button
+                  type="button"
+                  onClick={onMic}
+                  className="p-3 md:p-4 text-white/40 hover:text-brand-primary transition-colors rounded-full hover:bg-white/5 shrink-0"
+                  title="Voice input (Chrome/Edge)"
+                >
+                  <Mic className="w-5 h-5" />
+                </button>
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Describe your AR asset…"
+                  className="flex-1 min-w-[120px] bg-transparent border-none outline-none py-3 md:py-4 text-sm placeholder:text-white/20"
+                />
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSettingsOpen(!settingsOpen)}
+                    className={`p-3 md:p-4 rounded-full transition-colors ${settingsOpen ? 'bg-brand-primary/20 text-brand-primary' : 'text-white/30 hover:text-white hover:bg-white/5'}`}
+                    title="Generation settings"
+                  >
+                    <SlidersHorizontal className="w-5 h-5" />
+                  </button>
+                  {settingsOpen && (
+                    <div className="absolute bottom-full right-0 mb-2 w-[min(100vw-2rem,280px)] rounded-2xl border border-white/10 bg-[#0c0c0c] p-4 shadow-2xl z-50 text-left">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Output</span>
+                        <button type="button" onClick={() => setSettingsOpen(false)} className="text-white/40">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <label className="block text-[10px] text-white/40 mb-1">Concept images</label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={4}
+                        value={gen.imageCount}
+                        onChange={(e) => setGen((g) => ({ ...g, imageCount: +e.target.value }))}
+                        className="w-full mb-3 accent-brand-primary"
+                      />
+                      <div className="text-xs text-white/60 mb-3">{gen.imageCount} images</div>
+                      <label className="block text-[10px] text-white/40 mb-1">3D models</label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={3}
+                        value={gen.modelCount}
+                        onChange={(e) => setGen((g) => ({ ...g, modelCount: +e.target.value }))}
+                        className="w-full mb-3 accent-brand-primary"
+                      />
+                      <div className="text-xs text-white/60 mb-3">{gen.modelCount} model(s)</div>
+                      <label className="block text-[10px] text-white/40 mb-2">Mesh detail</label>
+                      <div className="flex gap-2">
+                        {(['low', 'medium', 'high'] as const).map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => setGen((g) => ({ ...g, poly: p }))}
+                            className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border ${gen.poly === p ? 'border-brand-primary bg-brand-primary/15 text-brand-primary' : 'border-white/10 text-white/40'}`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  className="p-3 md:p-4 text-white/30 hover:text-brand-primary transition-colors rounded-full hover:bg-white/5 shrink-0"
+                  title="Attach reference image"
+                >
+                  <Paperclip className="w-5 h-5" />
+                </button>
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isGenerating}
+                  className="p-3 md:p-4 bg-brand-primary text-black rounded-full hover:bg-brand-primary/90 disabled:opacity-50 transition-all shadow-lg shadow-brand-primary/20 shrink-0"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
+            </form>
+            <p className="text-[9px] text-center text-white/25 mt-4 uppercase tracking-widest">
+              ARdya · {selectedProvider} · {project.useCase ? `use case: ${project.useCase}` : ''}{' '}
+              {project.category ? `• ${project.category}` : ''}
+            </p>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}

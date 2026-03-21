@@ -45,14 +45,14 @@ Today the app is a **static/SSR-ready SPA** that talks to **no first-party API**
 
 ```mermaid
 flowchart TB
-  subgraph client [Browser — VisiARise SPA]
-    UI[React Router pages]
-    Z[Zustand + localStorage]
-    IDB[(IndexedDB — studio GLB blobs)]
-    R3F[@react-three/fiber + drei]
-    THREE[Three.js — AR Studio]
-    MV[model-viewer — WebAR]
-    GSAP[GSAP ScrollTrigger + ScrollToPlugin]
+  subgraph client ["Browser - VisiARise SPA"]
+    UI["React Router pages"]
+    Z["Zustand + localStorage"]
+    IDB["IndexedDB - studio GLB blobs"]
+    R3F["@react-three/fiber + drei"]
+    THREE["Three.js - AR Studio"]
+    MV["model-viewer - WebAR"]
+    GSAP["GSAP ScrollTrigger + ScrollToPlugin"]
     UI --> Z
     UI --> IDB
     UI --> R3F
@@ -61,15 +61,15 @@ flowchart TB
     UI --> GSAP
   end
 
-  subgraph future [Target production backend]
-    API[BFF / API Gateway]
-    AUTH[Auth service — Firebase Auth or OIDC]
-    DB[(Primary DB — Postgres or Firestore)]
-    OBJ[(Object storage — S3 / GCS / Firebase Storage)]
-    Q[Queue — 3D jobs]
-    MESHY[Meshy API]
-    HYPER[Hyper3D API]
-    OTHER[Other 3D providers]
+  subgraph future ["Target production backend"]
+    API["BFF / API Gateway"]
+    AUTH["Auth service - Firebase Auth or OIDC"]
+    DB["Primary DB - Postgres or Firestore"]
+    OBJ["Object storage - S3 / GCS / Firebase Storage"]
+    Q["Queue - 3D jobs"]
+    MESHY["Meshy API"]
+    HYPER["Hyper3D API"]
+    OTHER["Other 3D providers"]
     API --> AUTH
     API --> DB
     API --> OBJ

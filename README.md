@@ -4,17 +4,6 @@ Web platform for **AI-assisted 3D creation**, **in-browser editing**, **marketpl
 
 ---
 
-## By the numbers
-
-Snapshot of **first-party `src/`** only (`node_modules`, `dist`, and lockfiles excluded):
-
-| Metric | Count |
-|--------|------:|
-| **Source files** | 39 |
-| **Lines — TypeScript + TSX** | ~7,420 |
-| **Lines — global CSS** (`index.css`) | ~260 |
-| **Total application LOC (rounded)** | **~7,700** |
-
 ### Animation & motion
 
 | Layer | What it covers | Approx. count |

@@ -23,8 +23,12 @@ const meshy3DTaskSchema = new mongoose.Schema(
     },
     artStyle: {
       type: String,
-      enum: ['realistic', 'cartoon', 'low-poly', 'sculpture', 'pbr'],
+      enum: ['realistic', 'cartoon', 'low-poly', 'sculpture', 'pbr', ''],
       default: 'realistic',
+    },
+    texturePrompt: {
+      type: String,
+      default: '',
     },
     status: {
       type: String,
@@ -43,6 +47,7 @@ const meshy3DTaskSchema = new mongoose.Schema(
       usdz: String,
       obj: String,
       mtl: String,
+      stl: String,
     },
     thumbnailUrl: String,
     videoUrl: String,
@@ -58,10 +63,8 @@ const meshy3DTaskSchema = new mongoose.Schema(
   }
 );
 
-// Index for faster queries
 meshy3DTaskSchema.index({ userId: 1, createdAt: -1 });
-meshy3DTaskSchema.index({ taskId: 1 });
+/* taskId: unique: true already creates an index — do not add meshy3DTaskSchema.index({ taskId }) */
 meshy3DTaskSchema.index({ status: 1 });
 
 module.exports = mongoose.model('Meshy3DTask', meshy3DTaskSchema);
-

@@ -60,9 +60,19 @@ app.use((err, req, res, next) => {
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+});
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `\n❌ Port ${PORT} is already in use. Either stop the other process (e.g. lsof -i :${PORT}) or set PORT=5001 in backend/.env\n`
+    );
+  } else {
+    console.error(err);
+  }
+  process.exit(1);
 });
 
 module.exports = app;

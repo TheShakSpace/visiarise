@@ -1,9 +1,9 @@
 const axios = require('axios');
 const Meshy3DTask = require('../models/Meshy3DTask');
+const { assertCanAfford, deductCredits, getCreditsRemaining, previewCost, refineCost } = require('../utils/credits');
 
-const MESHY_API_BASE_URL = 'https://api.meshy.ai/v2';
+const MESHY_API_BASE = 'https://api.meshy.ai/openapi/v2';
 
-// Helper function to get Meshy API key from environment
 const getMeshyApiKey = () => {
   if (!process.env.MESHY_API_KEY) {
     throw new Error('MESHY_API_KEY is not configured in environment variables');
@@ -11,50 +11,94 @@ const getMeshyApiKey = () => {
   return process.env.MESHY_API_KEY;
 };
 
-// @desc    Create a new 3D generation task
-// @route   POST /api/meshy/generate
-// @access  Private
+const meshyHeaders = () => ({
+  Authorization: `Bearer ${getMeshyApiKey()}`,
+  'Content-Type': 'application/json',
+});
+
+function mapPolyToTarget(poly) {
+  if (poly === 'low') return 12000;
+  if (poly === 'high') return 100000;
+  return 30000;
+}
+
+function applyMeshyTaskToDoc(task, meshyData) {
+  task.status = meshyData.status || task.status;
+  task.progress = typeof meshyData.progress === 'number' ? meshyData.progress : task.progress ?? 0;
+
+  const urls = meshyData.model_urls || {};
+  if (meshyData.status === 'SUCCEEDED') {
+    task.modelUrls = {
+      glb: urls.glb,
+      fbx: urls.fbx,
+      usdz: urls.usdz,
+      obj: urls.obj,
+      mtl: urls.mtl,
+      stl: urls.stl,
+    };
+    task.thumbnailUrl = meshyData.thumbnail_url;
+    task.videoUrl = meshyData.video_url;
+    task.completedAt = new Date();
+  } else if (meshyData.status === 'FAILED') {
+    const errMsg = meshyData.task_error?.message || meshyData.error || 'Generation failed';
+    task.errorMessage = errMsg;
+  }
+}
+
+// POST /api/meshy/generate — preview mesh (geometry)
 exports.generate3DModel = async (req, res) => {
-  const { prompt, mode = 'preview', art_style = 'realistic' } = req.body;
+  const { prompt, target_polycount, poly_budget } = req.body;
 
   try {
-    // Validate input
-    if (!prompt) {
+    if (!prompt || typeof prompt !== 'string') {
       return res.status(400).json({ message: 'Prompt is required' });
     }
 
-    const apiKey = getMeshyApiKey();
+    const cost = previewCost();
+    await assertCanAfford(req.user._id, cost);
 
-    // Create task in Meshy API
-    const createRes = await axios.post(
-      `${MESHY_API_BASE_URL}/text-to-3d`,
-      {
-        prompt,
-        mode,
-        art_style,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    const body = {
+      mode: 'preview',
+      prompt: prompt.trim().slice(0, 600),
+      ai_model: 'latest',
+    };
+
+    const tp =
+      typeof target_polycount === 'number'
+        ? target_polycount
+        : poly_budget
+          ? mapPolyToTarget(poly_budget)
+          : undefined;
+    if (tp) {
+      body.target_polycount = Math.min(300000, Math.max(100, Math.round(tp)));
+      body.should_remesh = true;
+    }
+
+    const createRes = await axios.post(`${MESHY_API_BASE}/text-to-3d`, body, {
+      headers: meshyHeaders(),
+    });
 
     const taskId = createRes.data.result;
+    if (!taskId) {
+      return res.status(502).json({ message: 'Meshy did not return a task id' });
+    }
 
-    // Save task to database
     const task = await Meshy3DTask.create({
       userId: req.user._id,
       taskId,
-      prompt,
-      mode,
-      artStyle: art_style,
+      prompt: body.prompt,
+      mode: 'preview',
+      artStyle: '',
       status: 'PENDING',
     });
 
+    await deductCredits(req.user._id, cost);
+    const creditsRemaining = await getCreditsRemaining(req.user._id);
+
     res.status(201).json({
-      message: '3D generation task created successfully',
+      message: '3D preview task created',
+      creditsCharged: cost,
+      creditsRemaining,
       task: {
         _id: task._id,
         taskId: task.taskId,
@@ -66,6 +110,10 @@ exports.generate3DModel = async (req, res) => {
       },
     });
   } catch (error) {
+    const status = error.status || error.response?.status;
+    if (status === 402) {
+      return res.status(402).json({ message: error.message });
+    }
     console.error('Generate 3D Model Error:', error.response?.data || error.message);
     res.status(500).json({
       message: 'Failed to create 3D generation task',
@@ -74,53 +122,22 @@ exports.generate3DModel = async (req, res) => {
   }
 };
 
-// @desc    Get status of a 3D generation task
-// @route   GET /api/meshy/task/:taskId
-// @access  Private
+// GET /api/meshy/task/:taskId
 exports.getTaskStatus = async (req, res) => {
   const { taskId } = req.params;
 
   try {
-    // Find task in database
     const task = await Meshy3DTask.findOne({ taskId, userId: req.user._id });
-
     if (!task) {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    const apiKey = getMeshyApiKey();
-
-    // Get status from Meshy API
-    const statusRes = await axios.get(
-      `${MESHY_API_BASE_URL}/text-to-3d/${taskId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-      }
-    );
+    const statusRes = await axios.get(`${MESHY_API_BASE}/text-to-3d/${taskId}`, {
+      headers: { Authorization: `Bearer ${getMeshyApiKey()}` },
+    });
 
     const meshyData = statusRes.data;
-
-    // Update task in database
-    task.status = meshyData.status;
-    task.progress = meshyData.progress || 0;
-
-    if (meshyData.status === 'SUCCEEDED') {
-      task.modelUrls = {
-        glb: meshyData.model_urls?.glb,
-        fbx: meshyData.model_urls?.fbx,
-        usdz: meshyData.model_urls?.usdz,
-        obj: meshyData.model_urls?.obj,
-        mtl: meshyData.model_urls?.mtl,
-      };
-      task.thumbnailUrl = meshyData.thumbnail_url;
-      task.videoUrl = meshyData.video_url;
-      task.completedAt = new Date();
-    } else if (meshyData.status === 'FAILED') {
-      task.errorMessage = meshyData.error || 'Generation failed';
-    }
-
+    applyMeshyTaskToDoc(task, meshyData);
     await task.save();
 
     res.json({
@@ -130,6 +147,7 @@ exports.getTaskStatus = async (req, res) => {
         prompt: task.prompt,
         mode: task.mode,
         artStyle: task.artStyle,
+        texturePrompt: task.texturePrompt,
         status: task.status,
         progress: task.progress,
         modelUrls: task.modelUrls,
@@ -149,22 +167,16 @@ exports.getTaskStatus = async (req, res) => {
   }
 };
 
-// @desc    Get all tasks for the authenticated user
-// @route   GET /api/meshy/tasks
-// @access  Private
 exports.getUserTasks = async (req, res) => {
   try {
     const { status, limit = 20, page = 1 } = req.query;
-
     const query = { userId: req.user._id };
-    if (status) {
-      query.status = status;
-    }
+    if (status) query.status = status;
 
     const tasks = await Meshy3DTask.find(query)
       .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
+      .limit(parseInt(limit, 10))
+      .skip((parseInt(page, 10) - 1) * parseInt(limit, 10));
 
     const total = await Meshy3DTask.countDocuments(query);
 
@@ -172,108 +184,108 @@ exports.getUserTasks = async (req, res) => {
       tasks,
       pagination: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit)),
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        pages: Math.ceil(total / parseInt(limit, 10)),
       },
     });
   } catch (error) {
     console.error('Get User Tasks Error:', error.message);
-    res.status(500).json({
-      message: 'Failed to get user tasks',
-      error: error.message,
-    });
+    res.status(500).json({ message: 'Failed to get user tasks', error: error.message });
   }
 };
 
-// @desc    Delete a task
-// @route   DELETE /api/meshy/task/:taskId
-// @access  Private
 exports.deleteTask = async (req, res) => {
   const { taskId } = req.params;
-
   try {
     const task = await Meshy3DTask.findOne({ taskId, userId: req.user._id });
-
     if (!task) {
       return res.status(404).json({ message: 'Task not found' });
     }
-
     await task.deleteOne();
-
     res.json({ message: 'Task deleted successfully' });
   } catch (error) {
     console.error('Delete Task Error:', error.message);
-    res.status(500).json({
-      message: 'Failed to delete task',
-      error: error.message,
-    });
+    res.status(500).json({ message: 'Failed to delete task', error: error.message });
   }
 };
 
-// @desc    Refine a preview model
-// @route   POST /api/meshy/refine/:taskId
-// @access  Private
+// POST /api/meshy/refine/:taskId — textured refine from a completed preview
 exports.refineModel = async (req, res) => {
   const { taskId } = req.params;
+  const { texture_prompt, texturePrompt, enable_pbr = true } = req.body || {};
+  const tex = (texture_prompt || texturePrompt || '').trim().slice(0, 600);
 
   try {
-    // Find the preview task
-    const previewTask = await Meshy3DTask.findOne({ 
-      taskId, 
+    const previewTask = await Meshy3DTask.findOne({
+      taskId,
       userId: req.user._id,
       mode: 'preview',
-      status: 'SUCCEEDED'
+      status: 'SUCCEEDED',
     });
 
     if (!previewTask) {
-      return res.status(404).json({ 
-        message: 'Preview task not found or not completed' 
+      return res.status(404).json({
+        message: 'Completed preview task not found — generate a model first',
       });
     }
 
-    const apiKey = getMeshyApiKey();
+    if (!tex) {
+      return res.status(400).json({ message: 'texture_prompt is required for texturing' });
+    }
 
-    // Create refine task in Meshy API
+    const cost = refineCost();
+    await assertCanAfford(req.user._id, cost);
+
     const createRes = await axios.post(
-      `${MESHY_API_BASE_URL}/text-to-3d`,
+      `${MESHY_API_BASE}/text-to-3d`,
       {
         mode: 'refine',
         preview_task_id: taskId,
+        texture_prompt: tex,
+        enable_pbr: !!enable_pbr,
+        ai_model: 'latest',
       },
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
+      { headers: meshyHeaders() }
     );
 
     const refineTaskId = createRes.data.result;
+    if (!refineTaskId) {
+      return res.status(502).json({ message: 'Meshy did not return a refine task id' });
+    }
 
-    // Save refine task to database
     const refineTask = await Meshy3DTask.create({
       userId: req.user._id,
       taskId: refineTaskId,
       prompt: previewTask.prompt,
       mode: 'refine',
-      artStyle: previewTask.artStyle,
+      artStyle: previewTask.artStyle || '',
+      texturePrompt: tex,
       status: 'PENDING',
     });
 
+    await deductCredits(req.user._id, cost);
+    const creditsRemaining = await getCreditsRemaining(req.user._id);
+
     res.status(201).json({
-      message: 'Refine task created successfully',
+      message: 'Texturing task created',
+      creditsCharged: cost,
+      creditsRemaining,
       task: {
         _id: refineTask._id,
         taskId: refineTask.taskId,
         prompt: refineTask.prompt,
         mode: refineTask.mode,
-        artStyle: refineTask.artStyle,
+        texturePrompt: refineTask.texturePrompt,
         status: refineTask.status,
         createdAt: refineTask.createdAt,
       },
     });
   } catch (error) {
+    const status = error.status || error.response?.status;
+    if (status === 402) {
+      return res.status(402).json({ message: error.message });
+    }
     console.error('Refine Model Error:', error.response?.data || error.message);
     res.status(500).json({
       message: 'Failed to create refine task',
@@ -281,5 +293,3 @@ exports.refineModel = async (req, res) => {
     });
   }
 };
-
-// Made with Bob

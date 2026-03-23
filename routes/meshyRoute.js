@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { protect, verifyEmail } = require('../middlewares/authMiddleware');
+const { protect } = require('../middlewares/authMiddleware');
 const {
   generate3DModel,
   getTaskStatus,

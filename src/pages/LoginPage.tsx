@@ -4,12 +4,15 @@ import { Mail, Lock, ArrowRight, Github, Chrome, Sparkles } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { DEMO_EMAIL, DEMO_PASSWORD } from '../constants/demo';
 import AuthSplitLayout from '../components/AuthSplitLayout';
+import { apiFetch, type LoginResponse } from '../lib/api';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const setUser = useAppStore((s) => s.setUser);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const fillDemo = () => {
     setEmail(DEMO_EMAIL);
@@ -21,19 +24,45 @@ export default function LoginPage() {
       id: 'visiarise-demo-user',
       email: DEMO_EMAIL,
       name: 'Demo Creator',
+      token: null,
+      credits: null,
+      isAdmin: false,
     });
     navigate('/dashboard');
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const local = email.trim().toLowerCase().split('@')[0] || 'Creator';
-    setUser({
-      id: 'user-' + (email.trim() || 'local'),
-      email: email.trim() || DEMO_EMAIL,
-      name: local.charAt(0).toUpperCase() + local.slice(1),
-    });
-    navigate('/dashboard');
+    setError(null);
+    setLoading(true);
+    try {
+      const data = await apiFetch<LoginResponse>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+        }),
+      });
+      setUser({
+        id: data._id,
+        email: data.email,
+        name: data.name,
+        token: data.token,
+        credits: data.credits,
+        isAdmin: data.isAdmin,
+        isVerified: data.isVerified,
+      });
+      navigate('/dashboard');
+    } catch (err) {
+      const e = err as Error & { status?: number; body?: { userId?: string } };
+      if (e.status === 403) {
+        setError('Verify your email first — check your inbox for the code, or complete signup.');
+      } else {
+        setError(e.message || 'Sign in failed');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -43,6 +72,10 @@ export default function LoginPage() {
       subtitle="Pick up where you left off — projects, AR Studio, and marketplace stay in sync on this device."
     >
       <form onSubmit={handleSubmit} className="space-y-5">
+        {error ? (
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200/90">{error}</div>
+        ) : null}
+
         <div className="space-y-2">
           <label className="text-[10px] font-bold uppercase tracking-widest text-white/35 ml-1">Email</label>
           <div className="relative">
@@ -83,9 +116,10 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          className="w-full mt-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-bold py-3.5 text-sm flex items-center justify-center gap-2 shadow-lg shadow-violet-900/30 transition-all"
+          disabled={loading}
+          className="w-full mt-2 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-bold py-3.5 text-sm flex items-center justify-center gap-2 shadow-lg shadow-violet-900/30 transition-all disabled:opacity-60"
         >
-          Sign in
+          {loading ? 'Signing in…' : 'Sign in'}
           <ArrowRight className="w-4 h-4" />
         </button>
 
@@ -102,7 +136,7 @@ export default function LoginPage() {
             Continue as demo account
           </button>
           <p className="text-[10px] text-white/40 text-center">
-            Opens your dashboard as <span className="text-white/60">{DEMO_EMAIL}</span> — no password needed.
+            Local preview only — Meshy generation needs a verified account with API access.
           </p>
           <button
             type="button"

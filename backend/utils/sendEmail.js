@@ -26,7 +26,7 @@ const sendEmail = async (options) => {
   });
 
   const mailOptions = {
-    from: '"NutBasket" <info@nut-basket.co.uk>',
+    from: `"VisiARise" <${process.env.EMAIL_FROM || process.env.EMAIL_USER || 'noreply@localhost'}>`,
     to: options.email,
     subject: options.subject,
     html: options.message,

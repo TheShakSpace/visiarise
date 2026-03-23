@@ -23,8 +23,34 @@ import {
   X,
 } from 'lucide-react';
 import { ArdyaWordmark } from '../components/ArdyaWordmark';
+import {
+  apiFetch,
+  type MeshyGenerateResponse,
+  type MeshyTaskPayload,
+  type MeshyTaskStatusResponse,
+} from '../lib/api';
 
 const ModelViewer = 'model-viewer' as any;
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function pollMeshyTask(taskId: string, token: string, maxAttempts = 100): Promise<MeshyTaskPayload> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const { task } = await apiFetch<MeshyTaskStatusResponse>(`/api/meshy/task/${encodeURIComponent(taskId)}`, {
+      token,
+    });
+    if (task.status === 'SUCCEEDED' || task.status === 'FAILED') {
+      if (task.status === 'FAILED') {
+        throw new Error(task.errorMessage || 'Meshy generation failed');
+      }
+      return task;
+    }
+    await sleep(2500);
+  }
+  throw new Error('Meshy task timed out — try again or check your Meshy dashboard.');
+}
 
 const CONCEPT_IMAGES = [
   '/Human_Avatar_Dhruv_Chaturvedi_img.png',
@@ -71,7 +97,7 @@ function startSpeechRecognition(
 export default function ProjectChat() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { projects, chatHistory, addChatMessage, updateProject } = useAppStore();
+  const { projects, chatHistory, addChatMessage, updateProject, user, setCredits } = useAppStore();
   const project = projects.find((p) => p.id === id);
 
   const [input, setInput] = useState('');
@@ -88,6 +114,8 @@ export default function ProjectChat() {
     modelCount: 1,
     poly: 'medium' as 'low' | 'medium' | 'high',
   });
+  /** Meshy: geometry preview | preview+refine | refine-only (needs prior preview on this project). */
+  const [meshyMeshMode, setMeshyMeshMode] = useState<'geometry' | 'full' | 'texture_only'>('full');
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
@@ -122,15 +150,138 @@ export default function ProjectChat() {
     if (e) e.preventDefault();
     if (!input.trim() || isGenerating) return;
 
+    const currentInput = input.trim();
+    const meshyLabel =
+      selectedProvider === 'Meshy AI'
+        ? meshyMeshMode === 'full'
+          ? 'Meshy · full textured model'
+          : meshyMeshMode === 'texture_only'
+            ? 'Meshy · texture only (refine)'
+            : 'Meshy · geometry (preview)'
+        : '';
+
     const userMessage: ChatMessage = {
       id: Math.random().toString(36).substr(2, 9),
       role: 'user',
-      content: `[${gen.poly} poly · ${gen.imageCount} images · ${gen.modelCount} model(s)] ${input}`,
+      content: meshyLabel
+        ? `[${meshyLabel} · ${gen.poly} poly] ${currentInput}`
+        : `[${gen.poly} poly · ${gen.imageCount} images · ${gen.modelCount} model(s)] ${currentInput}`,
     };
     addChatMessage(id!, userMessage);
-    const currentInput = input;
     setInput('');
     setIsGenerating(true);
+
+    const useMeshy = selectedProvider === 'Meshy AI';
+
+    if (useMeshy && !user?.token) {
+      addChatMessage(id!, {
+        id: Math.random().toString(36).substr(2, 9),
+        role: 'assistant',
+        content:
+          'Meshy runs on your VisiARise backend and needs a signed-in, verified account. Demo mode is local-only — sign out of demo and create an account (or sign in) to generate real GLBs.',
+      });
+      setIsGenerating(false);
+      return;
+    }
+
+    if (useMeshy && user?.token) {
+      try {
+        if (meshyMeshMode === 'texture_only' && !project?.meshyPreviewTaskId) {
+          throw new Error('Generate a “Model” preview on this project first, then use “Texture”.');
+        }
+
+        let previewId = project?.meshyPreviewTaskId || '';
+        let finalTask: MeshyTaskPayload;
+
+        if (meshyMeshMode === 'texture_only') {
+          const refineOnly = await apiFetch<MeshyGenerateResponse>(
+            `/api/meshy/refine/${encodeURIComponent(project!.meshyPreviewTaskId!)}`,
+            {
+              method: 'POST',
+              token: user.token,
+              body: JSON.stringify({
+                texture_prompt: currentInput,
+                enable_pbr: true,
+              }),
+            }
+          );
+          if (typeof refineOnly.creditsRemaining === 'number') {
+            setCredits(refineOnly.creditsRemaining);
+          }
+          finalTask = await pollMeshyTask(refineOnly.task.taskId, user.token);
+        } else {
+          const previewRes = await apiFetch<MeshyGenerateResponse>('/api/meshy/generate', {
+            method: 'POST',
+            token: user.token,
+            body: JSON.stringify({
+              prompt: currentInput,
+              poly_budget: gen.poly,
+            }),
+          });
+          if (typeof previewRes.creditsRemaining === 'number') {
+            setCredits(previewRes.creditsRemaining);
+          }
+
+          const previewTask = await pollMeshyTask(previewRes.task.taskId, user.token);
+          previewId = previewRes.task.taskId;
+          finalTask = previewTask;
+
+          if (meshyMeshMode === 'full') {
+            const refineRes = await apiFetch<MeshyGenerateResponse>(
+              `/api/meshy/refine/${encodeURIComponent(previewId)}`,
+              {
+                method: 'POST',
+                token: user.token,
+                body: JSON.stringify({
+                  texture_prompt: currentInput,
+                  enable_pbr: true,
+                }),
+              }
+            );
+            if (typeof refineRes.creditsRemaining === 'number') {
+              setCredits(refineRes.creditsRemaining);
+            }
+            finalTask = await pollMeshyTask(refineRes.task.taskId, user.token);
+          }
+        }
+
+        const finalGlb = finalTask.modelUrls?.glb;
+        if (!finalGlb) {
+          throw new Error('Meshy finished but no GLB URL was returned yet — open the task again in a moment.');
+        }
+
+        const aiMessage: ChatMessage = {
+          id: Math.random().toString(36).substr(2, 9),
+          role: 'assistant',
+          content:
+            meshyMeshMode === 'full'
+              ? `Meshy: textured model ready for “${currentInput.slice(0, 72)}${currentInput.length > 72 ? '…' : ''}”. Open in AR Studio or publish to WebAR.`
+              : meshyMeshMode === 'texture_only'
+                ? `Meshy: new textures applied from your prompt. Open in AR Studio or publish to WebAR.`
+                : `Meshy: geometry preview ready (untinted mesh). Switch to “Texture” to paint this preview, or “Textured” for a one-shot full model next time.`,
+          modelUrl: finalGlb,
+        };
+        addChatMessage(id!, aiMessage);
+
+        updateProject(id!, {
+          modelUrl: finalGlb,
+          modelDataUrl: undefined,
+          thumbnailUrl: finalTask.thumbnailUrl || project?.thumbnailUrl,
+          meshyPreviewTaskId: previewId || project?.meshyPreviewTaskId,
+          status: 'draft',
+        });
+      } catch (err) {
+        const msg = (err as Error).message || 'Meshy request failed';
+        addChatMessage(id!, {
+          id: Math.random().toString(36).substr(2, 9),
+          role: 'assistant',
+          content: `Meshy error: ${msg}`,
+        });
+      } finally {
+        setIsGenerating(false);
+      }
+      return;
+    }
 
     const imgs = CONCEPT_IMAGES.slice(0, Math.min(4, Math.max(1, gen.imageCount)));
 
@@ -373,7 +524,54 @@ export default function ProjectChat() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+            {selectedProvider === 'Meshy AI' ? (
+              <div
+                className="flex flex-wrap rounded-full bg-white/5 border border-white/10 p-1 gap-0.5 max-w-[min(100%,280px)]"
+                title="Model = geometry preview. Textured = preview + refine. Texture = refine only (after a Model on this project)."
+              >
+                <button
+                  type="button"
+                  onClick={() => setMeshyMeshMode('geometry')}
+                  className={`px-2.5 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest transition-all ${
+                    meshyMeshMode === 'geometry'
+                      ? 'bg-brand-primary text-black'
+                      : 'text-white/45 hover:text-white/80'
+                  }`}
+                >
+                  Model
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMeshyMeshMode('full')}
+                  className={`px-2.5 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest transition-all ${
+                    meshyMeshMode === 'full'
+                      ? 'bg-brand-primary text-black'
+                      : 'text-white/45 hover:text-white/80'
+                  }`}
+                >
+                  Textured
+                </button>
+                <button
+                  type="button"
+                  disabled={!project?.meshyPreviewTaskId}
+                  onClick={() => setMeshyMeshMode('texture_only')}
+                  className={`px-2.5 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest transition-all disabled:opacity-25 disabled:pointer-events-none ${
+                    meshyMeshMode === 'texture_only'
+                      ? 'bg-brand-primary text-black'
+                      : 'text-white/45 hover:text-white/80'
+                  }`}
+                >
+                  Texture
+                </button>
+              </div>
+            ) : null}
+            {user?.token ? (
+              <span className="text-[9px] font-bold uppercase tracking-widest text-white/35 hidden sm:inline">
+                Credits{' '}
+                <span className="text-brand-primary/90">{user.isAdmin ? '∞' : user.credits ?? '—'}</span>
+              </span>
+            ) : null}
             <div className="relative">
               <button
                 type="button"
@@ -437,8 +635,11 @@ export default function ProjectChat() {
                 <div className="space-y-2">
                   <h3 className="text-lg font-bold tracking-tight">Welcome to ARdya</h3>
                   <p className="text-sm leading-relaxed text-white/60 max-w-xl">
-                    Turn prompts or reference images into AR-ready GLBs. Use the gear in the composer for image count,
-                    model count, and poly budget — same bar as your prompt (like Veo-style controls).
+                    With <span className="text-white/80">Meshy AI</span>, use the header toggles:{' '}
+                    <span className="text-white/80">Model</span> (geometry),{' '}
+                    <span className="text-white/80">Textured</span> (preview + materials), or{' '}
+                    <span className="text-white/80">Texture</span> to refine an existing preview on this project. Other
+                    engines still use concept images from the gear menu (poly, image count).
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">

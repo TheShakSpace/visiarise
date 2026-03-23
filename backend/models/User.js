@@ -42,6 +42,11 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    credits: {
+      type: Number,
+      default: () => Number(process.env.DEFAULT_SIGNUP_CREDITS || 100),
+      min: 0,
+    },
     createdAt: {
       type: Date,
       default: Date.now,
@@ -52,7 +57,6 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Hash password before saving
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
     return next();
@@ -62,11 +66,8 @@ userSchema.pre('save', async function (next) {
   next();
 });
 
-// Method to compare passwords
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
 module.exports = mongoose.model('User', userSchema);
-
-// Made with Bob

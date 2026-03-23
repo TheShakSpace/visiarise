@@ -16,6 +16,7 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const SignupPage = lazy(() => import('./pages/SignupPage'));
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'));
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const ProjectChat = lazy(() => import('./pages/ProjectChat'));
 const Studio = lazy(() => import('./pages/Studio'));
@@ -56,6 +57,7 @@ export default function App() {
               <Route path="/login" element={!user ? <LoginPage /> : <Navigate to="/dashboard" />} />
               <Route path="/signup" element={!user ? <SignupPage /> : <Navigate to="/dashboard" />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               
               {/* Protected Routes */}
               <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/login" />} />

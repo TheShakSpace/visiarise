@@ -1,11 +1,16 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { clearAllStudioAssets, loadProjectHeavyAssets, persistProjectHeavyAssets } from '../lib/studioAssetDb';
+import { apiFetch, type MeResponse } from '../lib/api';
 
 export interface User {
   id: string;
   email: string;
   name: string;
+  token?: string | null;
+  isAdmin?: boolean;
+  credits?: number | null;
+  isVerified?: boolean;
 }
 
 export type ProjectUseCase = 'game' | 'company' | 'freelance' | 'business' | 'product' | '';
@@ -67,6 +72,8 @@ export interface Project {
   category?: string;
   /** Extra imported models in the studio scene */
   studioExtras?: StudioExtraModel[];
+  /** Last succeeded Meshy preview task id (for optional re-texture flows). */
+  meshyPreviewTaskId?: string;
   /** PNG/JPEG/WebP as data URL — shown as a plane “sticker” in scene */
   logoDataUrl?: string;
   logoScale?: number;
@@ -188,6 +195,8 @@ interface AppState {
   // Auth Actions
   setUser: (user: User | null) => void;
   updateUser: (updates: Partial<Pick<User, 'name' | 'email'>>) => void;
+  setCredits: (credits: number | null) => void;
+  refreshUser: () => Promise<void>;
   logout: () => void;
   setOnboardingCompleted: (completed: boolean) => void;
   
@@ -240,6 +249,32 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           user: state.user ? { ...state.user, ...updates } : null,
         })),
+      setCredits: (credits) =>
+        set((state) => ({
+          user: state.user ? { ...state.user, credits } : null,
+        })),
+      refreshUser: async () => {
+        const token = useAppStore.getState().user?.token;
+        if (!token) return;
+        try {
+          const me = await apiFetch<MeResponse>('/api/auth/me', { token });
+          set((state) => ({
+            user: state.user
+              ? {
+                  ...state.user,
+                  id: me._id,
+                  name: me.name,
+                  email: me.email,
+                  isAdmin: me.isAdmin,
+                  credits: me.credits,
+                  isVerified: me.isVerified,
+                }
+              : null,
+          }));
+        } catch (e) {
+          console.warn('[VisiARise] refreshUser failed', e);
+        }
+      },
       logout: () => {
         void clearAllStudioAssets();
         set({ user: null, projects: [], currentProject: null, chatHistory: {}, cart: [] });
@@ -287,7 +322,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       /** New key so users aren’t stuck with pre-catalog `marketplaceItems` from older builds */
-      name: 'visiarise-storage-v4',
+      name: 'visiarise-storage-v5',
       partialize: (state) => ({
         user: state.user,
         projects: state.projects.map(stripHeavyFromProjectForPersist),

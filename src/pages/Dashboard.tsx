@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAppStore, Project } from '../store/useAppStore';
+import { apiFetch } from '../lib/api';
 import { motion } from 'motion/react';
 import {
   Plus,
@@ -23,13 +24,20 @@ import {
 import { ArdyaWordmark } from '../components/ArdyaWordmark';
 
 export default function Dashboard() {
-  const { user, projects, addProject, logout, updateUser } = useAppStore();
+  const { user, projects, addProject, logout, updateUser, refreshUser } = useAppStore();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [profileName, setProfileName] = useState(user?.name ?? '');
   const [profileEmail, setProfileEmail] = useState(user?.email ?? '');
   const [profileSaved, setProfileSaved] = useState(false);
+  const [grantEmail, setGrantEmail] = useState('');
+  const [grantAmount, setGrantAmount] = useState('50');
+  const [grantMsg, setGrantMsg] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    void refreshUser();
+  }, [refreshUser]);
 
   useEffect(() => {
     setProfileName(user?.name ?? '');
@@ -125,6 +133,57 @@ export default function Dashboard() {
               {profileSaved ? 'Saved' : 'Save profile'}
             </button>
           </div>
+          {user?.isAdmin ? (
+            <div className="px-2 pb-4 space-y-2 border-b border-white/5 mb-4">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-200/70 flex items-center gap-2">
+                <CreditCard className="w-3 h-3" />
+                Admin · credits
+              </p>
+              <input
+                type="email"
+                value={grantEmail}
+                onChange={(e) => setGrantEmail(e.target.value)}
+                placeholder="user@email.com"
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-3 text-xs"
+              />
+              <input
+                type="number"
+                value={grantAmount}
+                onChange={(e) => setGrantAmount(e.target.value)}
+                placeholder="Amount (+/−)"
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-3 text-xs"
+              />
+              {grantMsg ? <p className="text-[10px] text-white/50">{grantMsg}</p> : null}
+              <button
+                type="button"
+                onClick={async () => {
+                  setGrantMsg(null);
+                  if (!user?.token) return;
+                  try {
+                    const res = await apiFetch<{ message: string; user: { email: string; credits: number | null } }>(
+                      '/api/auth/admin/grant-credits',
+                      {
+                        method: 'POST',
+                        token: user.token,
+                        body: JSON.stringify({
+                          email: grantEmail.trim().toLowerCase(),
+                          amount: Number(grantAmount),
+                        }),
+                      }
+                    );
+                    setGrantMsg(`${res.message} → ${res.user.email} now has ${res.user.credits ?? '∞'}`);
+                    void refreshUser();
+                  } catch (e) {
+                    setGrantMsg((e as Error).message);
+                  }
+                }}
+                className="w-full py-2 rounded-xl bg-amber-500/20 text-amber-100 text-[10px] font-bold uppercase tracking-widest border border-amber-500/30 hover:bg-amber-500/30"
+              >
+                Apply credit change
+              </button>
+            </div>
+          ) : null}
+
           <button
             onClick={() => {
               logout();
@@ -200,7 +259,12 @@ export default function Dashboard() {
           {[
             { icon: Box, label: "Total Models", value: projects.length, color: "text-brand-primary" },
             { icon: TrendingUp, label: "Views", value: "1.2k", color: "text-purple-500" },
-            { icon: CreditCard, label: "Credits", value: "850", color: "text-blue-500" },
+            {
+              icon: CreditCard,
+              label: "Credits",
+              value: !user?.token ? "—" : user.isAdmin ? "∞" : user.credits ?? "—",
+              color: "text-blue-500",
+            },
             { icon: Zap, label: "Usage", value: "12%", color: "text-orange-500" }
           ].map((stat, i) => (
             <div key={i} className="p-6 rounded-3xl bg-white/5 border border-white/10 backdrop-blur-sm">

@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { StudioNodeTransform } from '../store/useAppStore';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import { apiUrl } from './api';
+
+const MESHY_CDN = /^https:\/\/assets\.meshy\.ai\//i;
 
 export function loadGltf(url: string): Promise<THREE.Group> {
   if (url.startsWith('blob:')) {
@@ -20,6 +23,33 @@ export function loadGltf(url: string): Promise<THREE.Group> {
       reject
     );
   });
+}
+
+/** Load GLB from Meshy CDN via backend proxy (browser cannot fetch assets.meshy.ai — CORS). */
+export async function loadGltfMeshy(url: string, token: string | null | undefined): Promise<THREE.Group> {
+  if (!MESHY_CDN.test(url)) {
+    return loadGltf(url);
+  }
+  if (!token) {
+    throw new Error('Sign in to load Meshy-hosted models (CDN is proxied by the server).');
+  }
+  const res = await fetch(apiUrl('/api/meshy/proxy-asset'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(t || `Proxy failed (${res.status})`);
+  }
+  const buf = await res.arrayBuffer();
+  /** Use parse — do not pass a blob: URL into `loadGltf` (blob URLs are rejected as stale session links). */
+  const loader = new GLTFLoader();
+  const gltf = await loader.parseAsync(buf, '');
+  return gltf.scene as THREE.Group;
 }
 
 export function arrayBufferToGlbDataUrl(buffer: ArrayBuffer): string {

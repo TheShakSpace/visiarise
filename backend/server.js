@@ -1,78 +1,31 @@
 require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
 const connectToMongo = require('./db');
+const createApp = require('./createApp');
 
-// Import routes
-const authRoutes = require('./routes/authRoute');
-const meshyRoutes = require('./routes/meshyRoute');
-
-// Initialize Express app
-const app = express();
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Connect to MongoDB
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/meshy';
-connectToMongo(MONGO_URI);
+const app = createApp();
 
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/meshy', meshyRoutes);
-
-// Health check route
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Meshy API Backend is running',
-    timestamp: new Date().toISOString()
+async function start() {
+  await connectToMongo(MONGO_URI);
+  const PORT = process.env.PORT || 5000;
+  const server = app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
   });
-});
-
-// Root route
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Welcome to Meshy API Backend',
-    endpoints: {
-      auth: '/api/auth',
-      meshy: '/api/meshy',
-      health: '/health'
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `\n❌ Port ${PORT} is already in use. Either stop the other process (e.g. lsof -i :${PORT}) or set PORT=5001 in backend/.env\n`
+      );
+    } else {
+      console.error(err);
     }
+    process.exit(1);
   });
-});
+}
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found' });
-});
-
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
-  res.status(err.status || 500).json({
-    message: err.message || 'Internal server error',
-    error: process.env.NODE_ENV === 'development' ? err : {},
-  });
-});
-
-// Start server
-const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-});
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(
-      `\n❌ Port ${PORT} is already in use. Either stop the other process (e.g. lsof -i :${PORT}) or set PORT=5001 in backend/.env\n`
-    );
-  } else {
-    console.error(err);
-  }
-  process.exit(1);
-});
+if (require.main === module) {
+  start();
+}
 
 module.exports = app;

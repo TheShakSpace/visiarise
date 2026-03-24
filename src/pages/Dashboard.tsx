@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAppStore, Project } from '../store/useAppStore';
-import { apiFetch } from '../lib/api';
+import { useAppStore, Project, apiProjectToProject } from '../store/useAppStore';
+import { apiFetch, type ProjectOneResponse } from '../lib/api';
 import { motion } from 'motion/react';
 import {
   Plus,
@@ -24,7 +24,7 @@ import {
 import { ArdyaWordmark } from '../components/ArdyaWordmark';
 
 export default function Dashboard() {
-  const { user, projects, addProject, logout, updateUser, refreshUser } = useAppStore();
+  const { user, projects, addProject, logout, updateUser, refreshUser, syncProjectsFromServer } = useAppStore();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [profileName, setProfileName] = useState(user?.name ?? '');
@@ -40,6 +40,10 @@ export default function Dashboard() {
   }, [refreshUser]);
 
   useEffect(() => {
+    if (user?.token) void syncProjectsFromServer();
+  }, [user?.token, syncProjectsFromServer]);
+
+  useEffect(() => {
     setProfileName(user?.name ?? '');
     setProfileEmail(user?.email ?? '');
   }, [user?.name, user?.email]);
@@ -52,7 +56,26 @@ export default function Dashboard() {
     window.setTimeout(() => setProfileSaved(false), 2000);
   };
 
-  const handleCreateProject = () => {
+  const handleCreateProject = async () => {
+    if (user?.token) {
+      try {
+        const { project } = await apiFetch<ProjectOneResponse>('/api/projects', {
+          method: 'POST',
+          token: user.token,
+          body: JSON.stringify({
+            name: 'Untitled Project',
+            description: 'A new AR experience with ARdya.',
+          }),
+        });
+        const p = apiProjectToProject(project);
+        addProject(p);
+        navigate(`/project/${p.id}`);
+      } catch (e) {
+        console.error(e);
+        alert((e as Error).message || 'Could not create project — check API and MongoDB.');
+      }
+      return;
+    }
     const newProject: Project = {
       id: Math.random().toString(36).substr(2, 9),
       name: 'Untitled Project',

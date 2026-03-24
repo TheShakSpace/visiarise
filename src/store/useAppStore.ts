@@ -1,7 +1,15 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { clearAllStudioAssets, loadProjectHeavyAssets, persistProjectHeavyAssets } from '../lib/studioAssetDb';
-import { apiFetch, type MeResponse } from '../lib/api';
+import {
+  apiFetch,
+  type ApiChatMessage,
+  type ApiProject,
+  type MeResponse,
+  type ModelUrlsPayload,
+  type ProjectsListResponse,
+} from '../lib/api';
+import { isMongoObjectId } from '../lib/mongoId';
 
 export interface User {
   id: string;
@@ -28,6 +36,36 @@ export type StudioNodeTransform = {
   rotation: [number, number, number];
   scale: [number, number, number];
 };
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  status: 'draft' | 'published';
+  modelUrl?: string;
+  /** Inlined user upload (persists across refresh; blob: URLs do not). */
+  modelDataUrl?: string;
+  thumbnailUrl?: string;
+  /** How you use ARdya — shapes defaults in the workspace */
+  useCase?: ProjectUseCase;
+  /** Free-form tag e.g. footwear, automotive */
+  category?: string;
+  /** Extra imported models in the studio scene */
+  studioExtras?: StudioExtraModel[];
+  /** Last succeeded Meshy preview task id (for optional re-texture flows). */
+  meshyPreviewTaskId?: string;
+  /** Latest Meshy task id for the primary model (e.g. refine). */
+  meshyTaskId?: string;
+  /** Meshy export URLs (glb, fbx, usdz, …) for downloads in Studio / chat. */
+  modelUrls?: ModelUrlsPayload;
+  /** PNG/JPEG/WebP as data URL — shown as a plane “sticker” in scene */
+  logoDataUrl?: string;
+  logoScale?: number;
+  logoOffsetY?: number;
+  /** Persisted transforms keyed as `primary`, `logo`, or extra model `id` */
+  studioTransforms?: Record<string, StudioNodeTransform>;
+}
 
 /** Strip stale blob: URLs from persisted projects (they 404 after the tab/session ends). */
 function sanitizeProjectBlobUrls(project: Project): Project {
@@ -56,38 +94,96 @@ function stripHeavyFromProjectForPersist(p: Project): Project {
   };
 }
 
-export interface Project {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: string;
-  status: 'draft' | 'published';
-  modelUrl?: string;
-  /** Inlined user upload (persists across refresh; blob: URLs do not). */
-  modelDataUrl?: string;
-  thumbnailUrl?: string;
-  /** How you use ARdya — shapes defaults in the workspace */
-  useCase?: ProjectUseCase;
-  /** Free-form tag e.g. footwear, automotive */
-  category?: string;
-  /** Extra imported models in the studio scene */
-  studioExtras?: StudioExtraModel[];
-  /** Last succeeded Meshy preview task id (for optional re-texture flows). */
-  meshyPreviewTaskId?: string;
-  /** PNG/JPEG/WebP as data URL — shown as a plane “sticker” in scene */
-  logoDataUrl?: string;
-  logoScale?: number;
-  logoOffsetY?: number;
-  /** Persisted transforms keyed as `primary`, `logo`, or extra model `id` */
-  studioTransforms?: Record<string, StudioNodeTransform>;
-}
-
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   images?: string[];
   modelUrl?: string;
+  modelUrls?: ModelUrlsPayload;
+  meshyTaskId?: string;
+}
+
+const remotePatchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const REMOTE_PROJECT_KEYS = new Set([
+  'name',
+  'description',
+  'status',
+  'modelUrl',
+  'thumbnailUrl',
+  'meshyPreviewTaskId',
+  'meshyTaskId',
+  'modelUrls',
+  'useCase',
+  'category',
+  'studioTransforms',
+  'studioExtras',
+  'logoScale',
+  'logoOffsetY',
+]);
+
+function projectToRemotePatch(merged: Project): Record<string, unknown> {
+  const o: Record<string, unknown> = {};
+  for (const k of REMOTE_PROJECT_KEYS) {
+    const v = merged[k as keyof Project];
+    if (v !== undefined) o[k] = v;
+  }
+  return o;
+}
+
+function scheduleRemoteProjectPatch(id: string, merged: Project, token: string) {
+  const prev = remotePatchTimers.get(id);
+  if (prev) clearTimeout(prev);
+  remotePatchTimers.set(
+    id,
+    setTimeout(() => {
+      remotePatchTimers.delete(id);
+      const body = projectToRemotePatch(merged);
+      if (Object.keys(body).length === 0) return;
+      void apiFetch(`/api/projects/${id}`, {
+        method: 'PATCH',
+        token,
+        body: JSON.stringify(body),
+      }).catch((e) => console.warn('[VisiARise] project sync failed', e));
+    }, 650)
+  );
+}
+
+export function apiProjectToProject(p: ApiProject): Project {
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    createdAt: p.createdAt || new Date().toISOString(),
+    status: p.status,
+    modelUrl: p.modelUrl,
+    thumbnailUrl: p.thumbnailUrl,
+    meshyPreviewTaskId: p.meshyPreviewTaskId,
+    meshyTaskId: p.meshyTaskId,
+    modelUrls: p.modelUrls,
+    useCase: (p.useCase || '') as ProjectUseCase,
+    category: p.category,
+    studioTransforms: p.studioTransforms as Record<string, StudioNodeTransform> | undefined,
+    studioExtras: p.studioExtras?.map((e) => ({
+      id: e.id,
+      name: e.name || 'Layer',
+      modelUrl: e.modelUrl,
+    })),
+    logoScale: p.logoScale,
+    logoOffsetY: p.logoOffsetY,
+  };
+}
+
+export function apiChatToMessage(m: ApiChatMessage): ChatMessage {
+  return {
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    images: m.images,
+    modelUrl: m.modelUrl,
+    modelUrls: m.modelUrls,
+    meshyTaskId: m.meshyTaskId,
+  };
 }
 
 export interface MarketplaceItem {
@@ -204,7 +300,9 @@ interface AppState {
   addProject: (project: Project) => void;
   updateProject: (id: string, updates: Partial<Project>) => void;
   setCurrentProject: (project: Project | null) => void;
-  
+  syncProjectsFromServer: () => Promise<void>;
+  replaceChatHistory: (projectId: string, messages: ChatMessage[]) => void;
+
   // Chat Actions
   addChatMessage: (projectId: string, message: ChatMessage) => void;
   
@@ -291,16 +389,56 @@ export const useAppStore = create<AppState>()(
           const projects = state.projects.map((p) => (p.id === id ? { ...p, ...updates } : p));
           const merged = projects.find((p) => p.id === id);
           if (merged) queueMicrotask(() => void persistProjectHeavyAssets(id, merged));
-          return { projects };
+          const token = state.user?.token;
+          if (merged && token && isMongoObjectId(id)) {
+            queueMicrotask(() => scheduleRemoteProjectPatch(id, merged, token));
+          }
+          const nextCurrent =
+            state.currentProject?.id === id && merged ? merged : state.currentProject;
+          return { projects, currentProject: nextCurrent };
         }),
       setCurrentProject: (project) => set({ currentProject: project }),
-      
-      addChatMessage: (projectId, message) => set((state) => ({
-        chatHistory: {
-          ...state.chatHistory,
-          [projectId]: [...(state.chatHistory[projectId] || []), message],
-        },
-      })),
+
+      syncProjectsFromServer: async () => {
+        const token = useAppStore.getState().user?.token;
+        if (!token) return;
+        try {
+          const { projects } = await apiFetch<ProjectsListResponse>('/api/projects', { token });
+          set({ projects: projects.map(apiProjectToProject) });
+        } catch (e) {
+          console.warn('[VisiARise] syncProjectsFromServer failed', e);
+        }
+      },
+
+      replaceChatHistory: (projectId, messages) =>
+        set((state) => ({
+          chatHistory: { ...state.chatHistory, [projectId]: messages },
+        })),
+
+      addChatMessage: (projectId, message) => {
+        set((state) => ({
+          chatHistory: {
+            ...state.chatHistory,
+            [projectId]: [...(state.chatHistory[projectId] || []), message],
+          },
+        }));
+        const token = useAppStore.getState().user?.token;
+        if (token && isMongoObjectId(projectId)) {
+          void apiFetch<{ message: ApiChatMessage }>(`/api/projects/${projectId}/chat`, {
+            method: 'POST',
+            token,
+            body: JSON.stringify({
+              role: message.role,
+              content: message.content,
+              images: message.images,
+              modelUrl: message.modelUrl,
+              modelUrls: message.modelUrls,
+              meshyTaskId: message.meshyTaskId,
+              clientMessageId: message.id,
+            }),
+          }).catch((e) => console.warn('[VisiARise] chat sync failed', e));
+        }
+      },
       
       addMarketplaceItem: (item) => set((state) => ({
         marketplaceItems: [item, ...state.marketplaceItems],
@@ -347,21 +485,24 @@ export const useAppStore = create<AppState>()(
       },
       onRehydrateStorage: () => (_state, error) => {
         if (error) console.error('[VisiARise] persist rehydration error', error);
-        void (async () => {
-          try {
-            const { projects, updateProject } = useAppStore.getState();
-            for (const p of projects) {
-              const heavy = await loadProjectHeavyAssets(p);
-              const has =
-                heavy.modelDataUrl ||
-                heavy.logoDataUrl ||
-                heavy.studioExtras?.some((e) => e.modelDataUrl);
-              if (has) updateProject(p.id, heavy);
+        /** Defer until `const useAppStore = create(...)` finishes — avoids TDZ / circular init. */
+        queueMicrotask(() => {
+          void (async () => {
+            try {
+              const { projects, updateProject } = useAppStore.getState();
+              for (const p of projects) {
+                const heavy = await loadProjectHeavyAssets(p);
+                const has =
+                  heavy.modelDataUrl ||
+                  heavy.logoDataUrl ||
+                  heavy.studioExtras?.some((e) => e.modelDataUrl);
+                if (has) updateProject(p.id, heavy);
+              }
+            } catch (e) {
+              console.warn('[VisiARise] IndexedDB asset hydrate failed', e);
             }
-          } catch (e) {
-            console.warn('[VisiARise] IndexedDB asset hydrate failed', e);
-          }
-        })();
+          })();
+        });
       },
     }
   )

@@ -117,9 +117,27 @@ exports.loginUser = async (req, res) => {
     }
 
     if (!user.isVerified) {
-      return res.status(403).json({
-        message: 'Please verify your email before signing in.',
-        userId: user._id,
+      const otp = generateOTP();
+      const otpExpiry = Date.now() + 10 * 60 * 1000;
+      user.otp = otp;
+      user.otpExpiry = otpExpiry;
+      await user.save();
+
+      try {
+        await sendEmail({
+          email: user.email,
+          subject: 'VisiARise — sign in verification',
+          message: `<p>Your verification code is: <b>${otp}</b></p><p>It expires in 10 minutes.</p>`,
+        });
+      } catch (mailErr) {
+        console.error('Login OTP email failed:', mailErr.message);
+      }
+
+      return res.status(200).json({
+        needsVerification: true,
+        userId: user._id.toString(),
+        message:
+          'We sent a verification code to your email. Enter it below to finish signing in.',
       });
     }
 

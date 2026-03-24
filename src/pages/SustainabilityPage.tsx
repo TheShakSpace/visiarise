@@ -68,7 +68,7 @@ export default function SustainabilityPage() {
         ))}
 
         <p className="text-sm text-white/35 text-center pt-8 border-t border-white/10">
-          Questions? Email <span className="text-white/60">hello@visiarise.com</span> — we&apos;ll post updates
+          Questions? Email <span className="text-white/60">team@visiarise.com</span> — we&apos;ll post updates
           here as programs go live.
         </p>
       </section>

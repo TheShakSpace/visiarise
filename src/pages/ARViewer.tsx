@@ -1,5 +1,5 @@
 import { useParams, Link, useSearchParams, useLocation } from 'react-router-dom';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { motion } from 'motion/react';
 import {
@@ -12,17 +12,23 @@ import {
   Globe,
   ChevronRight,
   Info,
+  Loader2,
 } from 'lucide-react';
+import { apiUrl } from '../lib/api';
 
 const ModelViewer = 'model-viewer' as any;
 
 const DEFAULT_LOCAL_MODEL = '/Human_Avatar_Dhruv_Chaturvedi_model.glb';
+const MESHY_CDN = /^https:\/\/assets\.meshy\.ai\//i;
 
 export default function ARViewer() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const location = useLocation();
-  const { projects } = useAppStore();
+  const { projects, user } = useAppStore();
+  const [meshyBlobUrl, setMeshyBlobUrl] = useState<string | null>(null);
+  const [meshyLoadError, setMeshyLoadError] = useState<string | null>(null);
+  const [meshyLoading, setMeshyLoading] = useState(false);
 
   const isPublicPreview = location.pathname === '/try-ar';
   const project = id ? projects.find((p) => p.id === id) : undefined;
@@ -30,7 +36,7 @@ export default function ARViewer() {
   const modelFromQuery = searchParams.get('model');
   const nameFromQuery = searchParams.get('name');
 
-  const modelUrl = useMemo(() => {
+  const rawModelUrl = useMemo(() => {
     if (isPublicPreview) {
       let stored: string | null = null;
       try {
@@ -43,6 +49,67 @@ export default function ARViewer() {
     return project?.modelDataUrl || project?.modelUrl || DEFAULT_LOCAL_MODEL;
   }, [isPublicPreview, modelFromQuery, project?.modelDataUrl, project?.modelUrl]);
 
+  /** Local / data URLs work immediately; Meshy CDN needs proxy + blob. */
+  const directModelUrl = useMemo(() => {
+    if (!rawModelUrl) return null;
+    return MESHY_CDN.test(rawModelUrl) ? null : rawModelUrl;
+  }, [rawModelUrl]);
+
+  /** Meshy `assets.meshy.ai` URLs are blocked by CORS — fetch via API and use a blob URL for `<model-viewer>`. */
+  useEffect(() => {
+    setMeshyLoadError(null);
+    if (!rawModelUrl || !MESHY_CDN.test(rawModelUrl)) {
+      setMeshyBlobUrl(null);
+      return;
+    }
+    if (!user?.token) {
+      setMeshyBlobUrl(null);
+      setMeshyLoadError(
+        'This model is hosted on Meshy’s CDN. Open this page while signed in so we can load it through your account, or use “Publish AR” from AR Studio after export (embeds a local GLB).'
+      );
+      return;
+    }
+
+    setMeshyLoading(true);
+    let blobUrl: string | null = null;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(apiUrl('/api/meshy/proxy-asset'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${user.token}`,
+          },
+          body: JSON.stringify({ url: rawModelUrl }),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(t || res.statusText);
+        }
+        const blob = await res.blob();
+        if (cancelled) return;
+        blobUrl = URL.createObjectURL(blob);
+        setMeshyBlobUrl(blobUrl);
+      } catch (e) {
+        if (!cancelled) {
+          setMeshyLoadError((e as Error).message || 'Could not load model');
+          setMeshyBlobUrl(null);
+        }
+      } finally {
+        if (!cancelled) setMeshyLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [rawModelUrl, user?.token]);
+
+  const modelUrlForViewer = directModelUrl ?? meshyBlobUrl;
+
   const title = isPublicPreview
     ? nameFromQuery || 'AR preview'
     : project?.name || 'AR';
@@ -52,11 +119,11 @@ export default function ARViewer() {
     const u = new URL(window.location.href);
     if (isPublicPreview) {
       u.pathname = '/try-ar';
-      u.searchParams.set('model', modelUrl);
+      u.searchParams.set('model', rawModelUrl);
       if (nameFromQuery) u.searchParams.set('name', nameFromQuery);
     }
     return u.toString();
-  }, [isPublicPreview, modelUrl, nameFromQuery]);
+  }, [isPublicPreview, rawModelUrl, nameFromQuery]);
 
   const qrDataUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
@@ -99,9 +166,11 @@ export default function ARViewer() {
             <span className="truncate">Copy link</span>
           </button>
           <a
-            href={modelUrl}
+            href={modelUrlForViewer || rawModelUrl}
             download
-            className="flex-1 sm:flex-initial px-3 sm:px-4 py-2 rounded-full bg-emerald-500 text-black text-xs font-bold hover:bg-emerald-400 transition-all flex items-center justify-center gap-2"
+            className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2 rounded-full bg-emerald-500 text-black text-xs font-bold hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 ${
+              !modelUrlForViewer ? 'pointer-events-none opacity-40' : ''
+            }`}
           >
             <Download className="w-3 h-3 shrink-0" />
             GLB
@@ -111,25 +180,42 @@ export default function ARViewer() {
 
       <main className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
         <div className="flex-1 relative bg-gradient-to-br from-emerald-500/5 to-zinc-900/30 min-h-[50vh] lg:min-h-0">
-          <ModelViewer
-            key={modelUrl}
-            src={modelUrl}
-            ar
-            ar-modes="webxr scene-viewer quick-look"
-            camera-controls
-            auto-rotate
-            shadow-intensity="1"
-            exposure="1"
-            style={{ width: '100%', height: '100%', minHeight: '50vh', backgroundColor: '#0a0a0a' }}
-          >
-            <button
-              slot="ar-button"
-              className="absolute bottom-6 sm:bottom-10 left-1/2 -translate-x-1/2 max-w-[calc(100%-2rem)] px-5 sm:px-8 py-3 sm:py-4 bg-emerald-500 text-black text-sm sm:text-base font-bold rounded-full hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-2xl shadow-emerald-500/40"
+          {meshyLoading ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#0a0a0a] z-10">
+              <Loader2 className="w-10 h-10 animate-spin text-emerald-500" />
+              <p className="text-xs text-white/50">Loading model…</p>
+            </div>
+          ) : null}
+          {meshyLoadError ? (
+            <div className="absolute inset-0 flex items-center justify-center p-6 bg-[#0a0a0a] z-10">
+              <p className="text-sm text-red-200/90 text-center max-w-md leading-relaxed">{meshyLoadError}</p>
+            </div>
+          ) : null}
+          {modelUrlForViewer ? (
+            <ModelViewer
+              key={modelUrlForViewer}
+              src={modelUrlForViewer}
+              ar
+              ar-modes="webxr scene-viewer quick-look"
+              camera-controls
+              auto-rotate
+              shadow-intensity="1"
+              exposure="1"
+              style={{ width: '100%', height: '100%', minHeight: '50vh', backgroundColor: '#0a0a0a' }}
             >
-              <Smartphone className="w-5 h-5" />
-              View in your space
-            </button>
-          </ModelViewer>
+              <button
+                slot="ar-button"
+                className="absolute bottom-6 sm:bottom-10 left-1/2 -translate-x-1/2 max-w-[calc(100%-2rem)] px-5 sm:px-8 py-3 sm:py-4 bg-emerald-500 text-black text-sm sm:text-base font-bold rounded-full hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-2xl shadow-emerald-500/40"
+              >
+                <Smartphone className="w-5 h-5" />
+                View in your space
+              </button>
+            </ModelViewer>
+          ) : !meshyLoading && !meshyLoadError && !modelUrlForViewer ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-[#0a0a0a]">
+              <p className="text-sm text-white/40">No model to display</p>
+            </div>
+          ) : null}
 
           <div className="absolute top-4 left-4 sm:top-8 sm:left-8 space-y-2 sm:space-y-4 pointer-events-none">
             <div className="px-4 py-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center gap-3 w-fit">

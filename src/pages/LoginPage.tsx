@@ -4,13 +4,16 @@ import { Mail, Lock, ArrowRight, Github, Chrome, Sparkles } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { DEMO_EMAIL, DEMO_PASSWORD } from '../constants/demo';
 import AuthSplitLayout from '../components/AuthSplitLayout';
-import { apiFetch, type LoginResponse } from '../lib/api';
+import { apiFetch, type LoginResponse, type LoginSuccessResponse, type VerifyOtpResponse } from '../lib/api';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const setUser = useAppStore((s) => s.setUser);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [userIdForOtp, setUserIdForOtp] = useState<string | null>(null);
+  const [otp, setOtp] = useState('');
+  const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -34,6 +37,7 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setInfo(null);
     setLoading(true);
     try {
       const data = await apiFetch<LoginResponse>('/api/auth/login', {
@@ -43,23 +47,54 @@ export default function LoginPage() {
           password,
         }),
       });
+      if ('needsVerification' in data && data.needsVerification) {
+        setUserIdForOtp(data.userId);
+        setOtp('');
+        setInfo(data.message);
+        return;
+      }
+      const ok = data as LoginSuccessResponse;
       setUser({
-        id: data._id,
-        email: data.email,
-        name: data.name,
-        token: data.token,
-        credits: data.credits,
-        isAdmin: data.isAdmin,
-        isVerified: data.isVerified,
+        id: ok._id,
+        email: ok.email,
+        name: ok.name,
+        token: ok.token,
+        credits: ok.credits,
+        isAdmin: ok.isAdmin,
+        isVerified: ok.isVerified,
       });
       navigate('/dashboard');
     } catch (err) {
-      const e = err as Error & { status?: number; body?: { userId?: string } };
-      if (e.status === 403) {
-        setError('Verify your email first — check your inbox for the code, or complete signup.');
-      } else {
-        setError(e.message || 'Sign in failed');
-      }
+      setError((err as Error).message || 'Sign in failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userIdForOtp) return;
+    setError(null);
+    setInfo(null);
+    setLoading(true);
+    try {
+      const res = await apiFetch<VerifyOtpResponse>('/api/auth/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({ userId: userIdForOtp, otp: otp.trim() }),
+      });
+      const u = res.user;
+      setUser({
+        id: u._id,
+        email: u.email,
+        name: u.name,
+        token: res.token,
+        credits: u.credits,
+        isAdmin: u.isAdmin,
+        isVerified: u.isVerified,
+      });
+      navigate('/dashboard');
+    } catch (err) {
+      setError((err as Error).message || 'Verification failed');
     } finally {
       setLoading(false);
     }
@@ -71,6 +106,7 @@ export default function LoginPage() {
       title="Welcome back"
       subtitle="Pick up where you left off — projects, AR Studio, and marketplace stay in sync on this device."
     >
+      {!userIdForOtp ? (
       <form onSubmit={handleSubmit} className="space-y-5">
         {error ? (
           <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200/90">{error}</div>
@@ -175,6 +211,49 @@ export default function LoginPage() {
           </button>
         </div>
       </form>
+      ) : (
+      <form onSubmit={handleVerifyOtp} className="space-y-5">
+        {error ? (
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200/90">{error}</div>
+        ) : null}
+        {info ? (
+          <div className="rounded-2xl border border-violet-500/25 bg-violet-500/[0.08] px-4 py-3 text-sm text-violet-100/90">{info}</div>
+        ) : null}
+        <p className="text-sm text-white/60">
+          Enter the 6-digit code we emailed to <span className="text-white font-medium">{email.trim() || 'your inbox'}</span>.
+        </p>
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={6}
+          required
+          value={otp}
+          onChange={(ev) => setOtp(ev.target.value.replace(/\D/g, ''))}
+          placeholder="000000"
+          className="w-full bg-black/40 border border-white/[0.08] rounded-2xl py-3.5 px-4 text-center text-lg tracking-[0.4em] font-mono placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+        />
+        <button
+          type="submit"
+          disabled={loading || otp.length !== 6}
+          className="w-full rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-bold py-3.5 text-sm disabled:opacity-50"
+        >
+          {loading ? 'Verifying…' : 'Verify & continue'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setUserIdForOtp(null);
+            setOtp('');
+            setError(null);
+            setInfo(null);
+          }}
+          className="w-full text-xs text-white/40 hover:text-white/70"
+        >
+          Back to sign in
+        </button>
+      </form>
+      )}
 
       <p className="text-center mt-8 text-sm text-white/40">
         New here?{' '}

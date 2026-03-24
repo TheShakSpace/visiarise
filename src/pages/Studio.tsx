@@ -10,6 +10,7 @@ import {
   exportObject3DToGlbDataUrl,
   fitCameraToObject,
   loadGltf,
+  loadGltfMeshy,
   readStudioTransform,
 } from '../lib/studio3d';
 import {
@@ -34,6 +35,7 @@ import {
   Palette,
 } from 'lucide-react';
 import { ArdyaWordmark } from '../components/ArdyaWordmark';
+import { MeshyFormatDownloadLinks } from '../components/MeshyFormatDownloadLinks';
 
 const PRIMARY_ID = 'primary';
 const LOGO_ID = 'logo';
@@ -41,7 +43,7 @@ const LOGO_ID = 'logo';
 export default function Studio() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { projects, updateProject } = useAppStore();
+  const { projects, updateProject, user } = useAppStore();
   const [projectTitle, setProjectTitle] = useState('');
   const project = projects.find((p) => p.id === id);
 
@@ -275,7 +277,10 @@ export default function Studio() {
 
       setLoadError('');
       try {
-        const primary = await loadGltf(src);
+        const token = user?.token;
+        const primary = p.modelDataUrl
+          ? await loadGltf(p.modelDataUrl)
+          : await loadGltfMeshy(p.modelUrl || '', token);
         primary.userData.studioId = PRIMARY_ID;
         const trP = p.studioTransforms?.[PRIMARY_ID];
         if (trP) applyStudioTransform(primary, trP);
@@ -286,7 +291,9 @@ export default function Studio() {
         for (const ex of p.studioExtras || []) {
           const exSrc = ex.modelDataUrl || ex.modelUrl;
           if (!exSrc) continue;
-          const g = await loadGltf(exSrc);
+          const g = ex.modelDataUrl
+            ? await loadGltf(ex.modelDataUrl)
+            : await loadGltfMeshy(ex.modelUrl || '', token);
           g.userData.studioId = ex.id;
           const tr = p.studioTransforms?.[ex.id];
           if (tr) applyStudioTransform(g, tr);
@@ -347,7 +354,7 @@ export default function Studio() {
     };
 
     void run();
-  }, [id, sceneEpoch, primarySource, extrasSerialized, logoSerialized, transformsKey]);
+  }, [id, sceneEpoch, primarySource, extrasSerialized, logoSerialized, transformsKey, user?.token]);
 
   useEffect(() => {
     const root = contentRootRef.current;
@@ -633,6 +640,11 @@ export default function Studio() {
           >
             <Copy className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
+          {project?.modelUrls ? (
+            <div className="hidden lg:flex items-center mr-1 max-w-[200px] overflow-x-auto">
+              <MeshyFormatDownloadLinks urls={project.modelUrls} compact className="shrink-0" />
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={downloadMergedGlb}

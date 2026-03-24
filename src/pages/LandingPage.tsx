@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, memo, Fragment } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, memo, Fragment, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -34,6 +34,7 @@ import {
   type LandingDemoScene,
 } from '../lib/demoAssets';
 import { prefersLightMedia, subscribeConnectionChange } from '../lib/perf';
+import { apiFetch } from '../lib/api';
 
 gsap.registerPlugin(ScrollTrigger, ScrollToPlugin);
 
@@ -245,6 +246,38 @@ export default function LandingPage() {
     setLightMedia(prefersLightMedia());
     return subscribeConnectionChange(() => setLightMedia(prefersLightMedia()));
   }, []);
+
+  const [contactName, setContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactMessage, setContactMessage] = useState('');
+  const [contactLoading, setContactLoading] = useState(false);
+  const [contactStatus, setContactStatus] = useState<string | null>(null);
+  const [contactError, setContactError] = useState<string | null>(null);
+
+  const onContactSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setContactLoading(true);
+    setContactError(null);
+    setContactStatus(null);
+    try {
+      const data = await apiFetch<{ message: string }>('/api/contact', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: contactName.trim(),
+          email: contactEmail.trim(),
+          message: contactMessage.trim(),
+        }),
+      });
+      setContactStatus(data.message);
+      setContactName('');
+      setContactEmail('');
+      setContactMessage('');
+    } catch (err) {
+      setContactError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setContactLoading(false);
+    }
+  }, [contactName, contactEmail, contactMessage]);
 
   const [section2SceneReady, setSection2SceneReady] = useState(false);
   const section2SentinelRef = useRef<HTMLDivElement>(null);
@@ -1443,7 +1476,7 @@ export default function LandingPage() {
       </section>
 
       {/* 6. CTA: The Final Hook */}
-      <section className="relative z-10 border-t border-white/[0.06] bg-gradient-to-b from-zinc-950/80 via-brand-bg to-[#030010] py-20 sm:py-32 md:py-48 px-4 sm:px-6 md:px-20 text-center reveal">
+      <section id="contact" className="relative z-10 border-t border-white/[0.06] bg-gradient-to-b from-zinc-950/80 via-brand-bg to-[#030010] py-20 sm:py-32 md:py-48 px-4 sm:px-6 md:px-20 text-center reveal">
         <div className="absolute inset-0 z-0 pointer-events-none">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(100vw,720px)] h-[min(100vw,720px)] bg-teal-500/[0.07] blur-[140px] rounded-full opacity-70" />
           <div className="absolute top-1/3 right-1/4 w-[min(80vw,480px)] h-[min(80vw,480px)] bg-white/[0.04] blur-[100px] rounded-full opacity-60" />
@@ -1463,12 +1496,93 @@ export default function LandingPage() {
               Get Started for Free
             </Link>
             <a
-              href="mailto:hello@visiarise.com"
+              href="mailto:team@visiarise.com"
               className="w-full sm:w-auto px-8 sm:px-12 py-4 sm:py-6 rounded-full border border-white/15 bg-white/5 backdrop-blur-md text-white text-sm sm:text-base font-bold hover:bg-white/10 transition-all text-center"
             >
               Talk to Sales
             </a>
           </div>
+
+          <form
+            onSubmit={onContactSubmit}
+            className="mt-14 sm:mt-20 max-w-xl mx-auto text-left rounded-2xl sm:rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-6 sm:p-8 space-y-4"
+          >
+            <h3 className="text-center text-lg sm:text-xl font-display font-semibold text-white mb-1">Send a message</h3>
+            <p className="text-center text-sm text-brand-muted mb-4">
+              We&apos;ll reply from <span className="text-white/80">team@visiarise.com</span>
+            </p>
+            <div>
+              <label htmlFor="contact-name" className="block text-[10px] uppercase tracking-widest text-brand-muted mb-2">
+                Name
+              </label>
+              <input
+                id="contact-name"
+                type="text"
+                required
+                autoComplete="name"
+                value={contactName}
+                onChange={(ev) => setContactName(ev.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+                placeholder="Your name"
+              />
+            </div>
+            <div>
+              <label htmlFor="contact-email" className="block text-[10px] uppercase tracking-widest text-brand-muted mb-2">
+                Email
+              </label>
+              <input
+                id="contact-email"
+                type="email"
+                required
+                autoComplete="email"
+                value={contactEmail}
+                onChange={(ev) => setContactEmail(ev.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+                placeholder="you@company.com"
+              />
+            </div>
+            <div>
+              <label htmlFor="contact-message" className="block text-[10px] uppercase tracking-widest text-brand-muted mb-2">
+                Message
+              </label>
+              <textarea
+                id="contact-message"
+                required
+                rows={4}
+                value={contactMessage}
+                onChange={(ev) => setContactMessage(ev.target.value)}
+                className="w-full resize-y min-h-[120px] rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+                placeholder="How can we help?"
+              />
+            </div>
+            {contactError ? (
+              <p className="text-sm text-red-400/90 text-center" role="alert">
+                {contactError}
+              </p>
+            ) : null}
+            {contactStatus ? (
+              <p className="text-sm text-teal-400/90 text-center" role="status">
+                {contactStatus}
+              </p>
+            ) : null}
+            <button
+              type="submit"
+              disabled={contactLoading}
+              className="w-full btn-neon-purple py-4 justify-center inline-flex items-center gap-2 disabled:opacity-60"
+            >
+              {contactLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden />
+                  Sending…
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" aria-hidden />
+                  Send message
+                </>
+              )}
+            </button>
+          </form>
         </div>
       </section>
 

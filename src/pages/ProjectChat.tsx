@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useAppStore, ChatMessage, ProjectUseCase } from '../store/useAppStore';
+import { useAppStore, apiChatToMessage, ChatMessage, ProjectUseCase } from '../store/useAppStore';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Send,
@@ -8,7 +8,6 @@ import {
   Sparkles,
   ArrowLeft,
   Box,
-  Image as ImageIcon,
   RefreshCw,
   Check,
   ChevronRight,
@@ -23,33 +22,62 @@ import {
   X,
 } from 'lucide-react';
 import { ArdyaWordmark } from '../components/ArdyaWordmark';
+import { MeshyFormatDownloadLinks } from '../components/MeshyFormatDownloadLinks';
+import MeshyModelViewer from '../components/MeshyModelViewer';
 import {
   apiFetch,
+  type ChatListResponse,
   type MeshyGenerateResponse,
   type MeshyTaskPayload,
   type MeshyTaskStatusResponse,
 } from '../lib/api';
-
-const ModelViewer = 'model-viewer' as any;
+import { isMongoObjectId } from '../lib/mongoId';
+import { compactModelUrls } from '../lib/meshyModel';
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function pollMeshyTask(taskId: string, token: string, maxAttempts = 100): Promise<MeshyTaskPayload> {
+async function pollMeshyTask(
+  taskId: string,
+  token: string,
+  opts?: { onProgress?: (pct: number) => void; maxAttempts?: number }
+): Promise<MeshyTaskPayload> {
+  const maxAttempts = opts?.maxAttempts ?? 100;
   for (let i = 0; i < maxAttempts; i++) {
     const { task } = await apiFetch<MeshyTaskStatusResponse>(`/api/meshy/task/${encodeURIComponent(taskId)}`, {
       token,
     });
+    if (typeof task.progress === 'number') {
+      opts?.onProgress?.(Math.min(100, Math.max(0, task.progress)));
+    }
     if (task.status === 'SUCCEEDED' || task.status === 'FAILED') {
       if (task.status === 'FAILED') {
         throw new Error(task.errorMessage || 'Meshy generation failed');
       }
+      opts?.onProgress?.(100);
       return task;
     }
     await sleep(2500);
   }
   throw new Error('Meshy task timed out — try again or check your Meshy dashboard.');
+}
+
+/** After preview succeeds, backend auto_refine sets linkedRefineTaskId on the preview document. */
+async function waitForLinkedRefineTask(previewTaskId: string, token: string, maxAttempts = 120): Promise<string> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const { task } = await apiFetch<MeshyTaskStatusResponse>(`/api/meshy/task/${encodeURIComponent(previewTaskId)}`, {
+      token,
+    });
+    if (task.autoRefineError) {
+      throw new Error(task.autoRefineError);
+    }
+    if (task.linkedRefineTaskId) {
+      return task.linkedRefineTaskId;
+    }
+    await sleep(2500);
+  }
+  throw new Error('Timed out waiting for automatic texturing to start — check credits and try refine manually.');
 }
 
 const CONCEPT_IMAGES = [
@@ -97,12 +125,24 @@ function startSpeechRecognition(
 export default function ProjectChat() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { projects, chatHistory, addChatMessage, updateProject, user, setCredits } = useAppStore();
+  const {
+    projects,
+    chatHistory,
+    addChatMessage,
+    updateProject,
+    user,
+    setCredits,
+    refreshUser,
+    replaceChatHistory,
+  } = useAppStore();
   const project = projects.find((p) => p.id === id);
 
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGenerating3D, setIsGenerating3D] = useState(false);
+  /** Staged reference image for Meshy image-to-3D (data URL). */
+  const [stagedImage, setStagedImage] = useState<string | null>(null);
+  const [meshyProgress, setMeshyProgress] = useState(0);
   const [selectedProvider, setSelectedProvider] = useState('Meshy AI');
   const [isProviderOpen, setIsProviderOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -143,6 +183,25 @@ export default function ProjectChat() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentMessages]);
+
+  useEffect(() => {
+    const pid = id;
+    if (!pid || !user?.token || !isMongoObjectId(pid)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { messages } = await apiFetch<ChatListResponse>(`/api/projects/${pid}/chat`, {
+          token: user.token,
+        });
+        if (!cancelled) replaceChatHistory(pid, messages.map(apiChatToMessage));
+      } catch (e) {
+        console.warn('[VisiARise] load chat failed', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, user?.token, replaceChatHistory]);
 
   if (!project) return <div className="p-10">Project not found.</div>;
 
@@ -186,6 +245,7 @@ export default function ProjectChat() {
 
     if (useMeshy && user?.token) {
       try {
+        setMeshyProgress(0);
         if (meshyMeshMode === 'texture_only' && !project?.meshyPreviewTaskId) {
           throw new Error('Generate a “Model” preview on this project first, then use “Texture”.');
         }
@@ -208,7 +268,9 @@ export default function ProjectChat() {
           if (typeof refineOnly.creditsRemaining === 'number') {
             setCredits(refineOnly.creditsRemaining);
           }
-          finalTask = await pollMeshyTask(refineOnly.task.taskId, user.token);
+          finalTask = await pollMeshyTask(refineOnly.task.taskId, user.token, {
+            onProgress: (n) => setMeshyProgress(n),
+          });
         } else {
           const previewRes = await apiFetch<MeshyGenerateResponse>('/api/meshy/generate', {
             method: 'POST',
@@ -216,32 +278,31 @@ export default function ProjectChat() {
             body: JSON.stringify({
               prompt: currentInput,
               poly_budget: gen.poly,
+              ...(meshyMeshMode === 'full'
+                ? {
+                    auto_refine: true,
+                    texture_prompt: currentInput,
+                    enable_pbr: true,
+                  }
+                : {}),
             }),
           });
           if (typeof previewRes.creditsRemaining === 'number') {
             setCredits(previewRes.creditsRemaining);
           }
 
-          const previewTask = await pollMeshyTask(previewRes.task.taskId, user.token);
+          const previewTask = await pollMeshyTask(previewRes.task.taskId, user.token, {
+            onProgress: (n) => setMeshyProgress(n),
+          });
           previewId = previewRes.task.taskId;
-          finalTask = previewTask;
 
           if (meshyMeshMode === 'full') {
-            const refineRes = await apiFetch<MeshyGenerateResponse>(
-              `/api/meshy/refine/${encodeURIComponent(previewId)}`,
-              {
-                method: 'POST',
-                token: user.token,
-                body: JSON.stringify({
-                  texture_prompt: currentInput,
-                  enable_pbr: true,
-                }),
-              }
-            );
-            if (typeof refineRes.creditsRemaining === 'number') {
-              setCredits(refineRes.creditsRemaining);
-            }
-            finalTask = await pollMeshyTask(refineRes.task.taskId, user.token);
+            const refineMeshyId = await waitForLinkedRefineTask(previewRes.task.taskId, user.token);
+            finalTask = await pollMeshyTask(refineMeshyId, user.token, {
+              onProgress: (n) => setMeshyProgress(n),
+            });
+          } else {
+            finalTask = previewTask;
           }
         }
 
@@ -249,6 +310,12 @@ export default function ProjectChat() {
         if (!finalGlb) {
           throw new Error('Meshy finished but no GLB URL was returned yet — open the task again in a moment.');
         }
+
+        if (meshyMeshMode === 'full') {
+          void refreshUser();
+        }
+
+        const urls = compactModelUrls(finalTask.modelUrls);
 
         const aiMessage: ChatMessage = {
           id: Math.random().toString(36).substr(2, 9),
@@ -260,6 +327,8 @@ export default function ProjectChat() {
                 ? `Meshy: new textures applied from your prompt. Open in AR Studio or publish to WebAR.`
                 : `Meshy: geometry preview ready (untinted mesh). Switch to “Texture” to paint this preview, or “Textured” for a one-shot full model next time.`,
           modelUrl: finalGlb,
+          modelUrls: urls,
+          meshyTaskId: finalTask.taskId,
         };
         addChatMessage(id!, aiMessage);
 
@@ -268,6 +337,8 @@ export default function ProjectChat() {
           modelDataUrl: undefined,
           thumbnailUrl: finalTask.thumbnailUrl || project?.thumbnailUrl,
           meshyPreviewTaskId: previewId || project?.meshyPreviewTaskId,
+          meshyTaskId: finalTask.taskId,
+          modelUrls: urls,
           status: 'draft',
         });
       } catch (err) {
@@ -279,6 +350,7 @@ export default function ProjectChat() {
         });
       } finally {
         setIsGenerating(false);
+        setMeshyProgress(0);
       }
       return;
     }
@@ -319,6 +391,79 @@ export default function ProjectChat() {
         status: 'draft',
       });
     }, 3000);
+  };
+
+  /** Meshy image-to-3D (OpenAPI v1) — uses staged upload preview. */
+  const handleGenerateFromImage = async () => {
+    if (!stagedImage || !user?.token || selectedProvider !== 'Meshy AI') return;
+    if (meshyMeshMode === 'texture_only') {
+      addChatMessage(id!, {
+        id: Math.random().toString(36).substr(2, 9),
+        role: 'assistant',
+        content:
+          'Texture-only needs an existing Meshy preview from this project. Switch to Model or Textured, or generate from text first.',
+      });
+      return;
+    }
+    setIsGenerating(true);
+    setMeshyProgress(0);
+    try {
+      const res = await apiFetch<MeshyGenerateResponse>('/api/meshy/generate-from-image', {
+        method: 'POST',
+        token: user.token,
+        body: JSON.stringify({
+          image_data_url: stagedImage,
+          poly_budget: gen.poly,
+          should_texture: meshyMeshMode !== 'geometry',
+          enable_pbr: meshyMeshMode !== 'geometry',
+        }),
+      });
+      if (typeof res.creditsRemaining === 'number') {
+        setCredits(res.creditsRemaining);
+      }
+      addChatMessage(id!, {
+        id: Math.random().toString(36).substr(2, 9),
+        role: 'user',
+        content: `[Meshy · image → 3D · ${gen.poly} poly · ${meshyMeshMode === 'geometry' ? 'geometry' : 'textured'}]`,
+      });
+      const finalTask = await pollMeshyTask(res.task.taskId, user.token, {
+        onProgress: (n) => setMeshyProgress(n),
+      });
+      const finalGlb = finalTask.modelUrls?.glb;
+      if (!finalGlb) {
+        throw new Error('Meshy finished but no GLB URL was returned yet — try again in a moment.');
+      }
+      void refreshUser();
+      const urls = compactModelUrls(finalTask.modelUrls);
+      addChatMessage(id!, {
+        id: Math.random().toString(36).substr(2, 9),
+        role: 'assistant',
+        content:
+          'Meshy: 3D model from your image is ready. Open in AR Studio or publish to WebAR.',
+        modelUrl: finalGlb,
+        modelUrls: urls,
+        meshyTaskId: finalTask.taskId,
+      });
+      updateProject(id!, {
+        modelUrl: finalGlb,
+        modelDataUrl: undefined,
+        thumbnailUrl: finalTask.thumbnailUrl || project?.thumbnailUrl,
+        meshyPreviewTaskId: res.task.taskId,
+        meshyTaskId: finalTask.taskId,
+        modelUrls: urls,
+        status: 'draft',
+      });
+      setStagedImage(null);
+    } catch (err) {
+      addChatMessage(id!, {
+        id: Math.random().toString(36).substr(2, 9),
+        role: 'assistant',
+        content: `Meshy error: ${(err as Error).message || 'Image-to-3D failed'}`,
+      });
+    } finally {
+      setIsGenerating(false);
+      setMeshyProgress(0);
+    }
   };
 
   const saveProjectName = () => {
@@ -429,8 +574,8 @@ export default function ProjectChat() {
             </h3>
             <div className="space-y-2">
               {project.modelUrl ? (
-                <div className="p-3 rounded-2xl bg-white/5 border border-white/10 group cursor-pointer hover:border-brand-primary/50 transition-all">
-                  <div className="aspect-square rounded-xl bg-black/40 mb-3 overflow-hidden">
+                <div className="p-3 rounded-2xl bg-white/5 border border-white/10 group hover:border-brand-primary/50 transition-all space-y-3">
+                  <div className="aspect-square rounded-xl bg-black/40 overflow-hidden">
                     <img
                       src={project.thumbnailUrl || '/Human_Avatar_Dhruv_Chaturvedi_img.png'}
                       alt="Model"
@@ -438,9 +583,19 @@ export default function ProjectChat() {
                     />
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-white/60">model.glb</span>
-                    <Download className="w-3 h-3 text-white/20 group-hover:text-brand-primary transition-colors" />
+                    <span className="text-[10px] font-bold text-white/60">Primary · GLB preview</span>
+                    <a
+                      href={project.modelUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      download
+                      className="p-1 rounded-lg hover:bg-white/10"
+                      title="Download GLB"
+                    >
+                      <Download className="w-3 h-3 text-white/20 group-hover:text-brand-primary transition-colors" />
+                    </a>
                   </div>
+                  <MeshyFormatDownloadLinks urls={project.modelUrls} />
                 </div>
               ) : (
                 <div className="p-8 rounded-2xl border border-dashed border-white/5 flex flex-col items-center justify-center text-center">
@@ -449,45 +604,6 @@ export default function ProjectChat() {
                 </div>
               )}
             </div>
-          </section>
-
-          <section>
-            <h3 className="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-4 px-2">
-              Reference Images
-            </h3>
-            <div className="grid grid-cols-2 gap-2">
-              {['/Shoes.png', '/robot_white.png', '/drone-generated.png'].map((src) => (
-                <div
-                  key={src}
-                  className="aspect-square rounded-xl bg-white/5 border border-white/10 overflow-hidden group cursor-pointer"
-                >
-                  <img
-                    src={src}
-                    alt=""
-                    className="w-full h-full object-cover opacity-40 group-hover:opacity-100 transition-opacity"
-                  />
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => imageInputRef.current?.click()}
-                className="aspect-square rounded-xl border border-dashed border-white/10 flex items-center justify-center hover:bg-white/5 transition-colors"
-              >
-                <ImageIcon className="w-4 h-4 text-white/20" />
-              </button>
-            </div>
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (!f) return;
-                const url = URL.createObjectURL(f);
-                updateProject(id!, { thumbnailUrl: url });
-              }}
-            />
           </section>
         </div>
 
@@ -528,7 +644,7 @@ export default function ProjectChat() {
             {selectedProvider === 'Meshy AI' ? (
               <div
                 className="flex flex-wrap rounded-full bg-white/5 border border-white/10 p-1 gap-0.5 max-w-[min(100%,280px)]"
-                title="Model = geometry preview. Textured = preview + refine. Texture = refine only (after a Model on this project)."
+                title="Model = geometry preview. Textured = one generate call; backend runs refine when preview is ready. Texture = refine only (after a Model on this project)."
               >
                 <button
                   type="button"
@@ -637,7 +753,7 @@ export default function ProjectChat() {
                   <p className="text-sm leading-relaxed text-white/60 max-w-xl">
                     With <span className="text-white/80">Meshy AI</span>, use the header toggles:{' '}
                     <span className="text-white/80">Model</span> (geometry),{' '}
-                    <span className="text-white/80">Textured</span> (preview + materials), or{' '}
+                    <span className="text-white/80">Textured</span> (preview then auto texturing on the server), or{' '}
                     <span className="text-white/80">Texture</span> to refine an existing preview on this project. Other
                     engines still use concept images from the gear menu (poly, image count).
                   </p>
@@ -711,15 +827,9 @@ export default function ProjectChat() {
                   )}
 
                   {msg.modelUrl && (
-                    <div className="rounded-[2.5rem] border border-white/10 bg-white/5 overflow-hidden shadow-2xl">
-                      <div className="aspect-square relative group">
-                        <ModelViewer
-                          src={msg.modelUrl}
-                          camera-controls
-                          auto-rotate
-                          shadow-intensity="1"
-                          style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
-                        />
+                    <div className="rounded-[2.5rem] border border-white/10 bg-white/5 overflow-hidden shadow-2xl space-y-4 pb-4">
+                      <div className="aspect-square relative group min-h-[280px]">
+                        <MeshyModelViewer src={msg.modelUrl} token={user?.token} />
                         <div className="absolute bottom-6 left-6 right-6 flex gap-3 opacity-0 group-hover:opacity-100 transition-all translate-y-4 group-hover:translate-y-0">
                           <button
                             type="button"
@@ -739,6 +849,9 @@ export default function ProjectChat() {
                           </button>
                         </div>
                       </div>
+                      <div className="px-6">
+                        <MeshyFormatDownloadLinks urls={msg.modelUrls} compact />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -750,11 +863,25 @@ export default function ProjectChat() {
                 <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center shrink-0">
                   <ArdyaWordmark className="text-[10px]" />
                 </div>
-                <div className="p-6 rounded-[2rem] bg-white/5 border border-white/5 flex items-center gap-4">
-                  <Loader2 className="w-5 h-5 animate-spin text-brand-primary" strokeWidth={1.5} />
-                  <span className="text-sm text-white/40 italic">
-                    {isGenerating ? `${selectedProvider} is thinking…` : `Building GLB (${gen.poly})…`}
-                  </span>
+                <div className="flex-1 p-6 rounded-[2rem] bg-white/5 border border-white/5 space-y-3 min-w-0">
+                  <div className="flex items-center gap-4">
+                    <Loader2 className="w-5 h-5 animate-spin text-brand-primary shrink-0" strokeWidth={1.5} />
+                    <span className="text-sm text-white/40 italic">
+                      {isGenerating3D
+                        ? `Building GLB (${gen.poly})…`
+                        : isGenerating && selectedProvider === 'Meshy AI'
+                          ? 'Meshy is generating your 3D model…'
+                          : `${selectedProvider} is thinking…`}
+                    </span>
+                  </div>
+                  {isGenerating && selectedProvider === 'Meshy AI' && meshyProgress > 0 ? (
+                    <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-brand-primary to-teal-400 transition-all duration-300"
+                        style={{ width: `${meshyProgress}%` }}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )}
@@ -765,6 +892,54 @@ export default function ProjectChat() {
 
         <div className="p-6 md:p-8 border-t border-white/5 bg-black/40 backdrop-blur-xl">
           <div className="max-w-3xl mx-auto">
+            {selectedProvider === 'Meshy AI' && stagedImage ? (
+              <div className="mb-4 flex flex-col sm:flex-row gap-4 items-start rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <img
+                  src={stagedImage}
+                  alt="Staged for 3D"
+                  className="w-full sm:w-40 h-40 object-cover rounded-xl border border-white/10 shrink-0"
+                />
+                <div className="flex-1 space-y-3 min-w-0">
+                  <p className="text-xs text-white/50">
+                    Image ready. Choose <span className="text-white/80">Model</span> (mesh) or{' '}
+                    <span className="text-white/80">Textured</span> in the header, then generate.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={isGenerating}
+                      onClick={handleGenerateFromImage}
+                      className="px-5 py-2.5 rounded-xl bg-brand-primary text-black text-[10px] font-bold uppercase tracking-widest hover:bg-brand-primary/90 disabled:opacity-50"
+                    >
+                      Generate 3D from image
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStagedImage(null)}
+                      className="px-5 py-2.5 rounded-xl border border-white/15 text-[10px] font-bold uppercase tracking-widest text-white/60 hover:bg-white/5"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = '';
+                if (!f || !f.type.startsWith('image/')) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  if (typeof reader.result === 'string') setStagedImage(reader.result);
+                };
+                reader.readAsDataURL(f);
+              }}
+            />
             <form onSubmit={handleSend} className="relative group">
               <div className="absolute -inset-1 bg-gradient-to-r from-brand-primary/20 to-brand-secondary/20 blur-2xl rounded-[3rem] opacity-0 group-focus-within:opacity-100 transition-all duration-500" />
               <div className="relative flex items-center gap-2 bg-white/5 border border-white/10 rounded-[2.5rem] p-2 md:p-3 focus-within:border-brand-primary/50 transition-all backdrop-blur-md flex-wrap">
@@ -840,7 +1015,11 @@ export default function ProjectChat() {
                   type="button"
                   onClick={() => imageInputRef.current?.click()}
                   className="p-3 md:p-4 text-white/30 hover:text-brand-primary transition-colors rounded-full hover:bg-white/5 shrink-0"
-                  title="Attach reference image"
+                  title={
+                    selectedProvider === 'Meshy AI'
+                      ? 'Attach image for image-to-3D (preview above, then Generate)'
+                      : 'Attach image'
+                  }
                 >
                   <Paperclip className="w-5 h-5" />
                 </button>

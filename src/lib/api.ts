@@ -49,7 +49,8 @@ export async function apiFetch<T>(
   return data as T;
 }
 
-export type LoginResponse = {
+/** Successful login (verified account). */
+export type LoginSuccessResponse = {
   _id: string;
   name: string;
   email: string;
@@ -59,12 +60,21 @@ export type LoginResponse = {
   token: string;
 };
 
+/** Valid password but email not verified — OTP emailed; use `/api/auth/verify-otp` next. */
+export type LoginNeedsVerificationResponse = {
+  needsVerification: true;
+  userId: string;
+  message: string;
+};
+
+export type LoginResponse = LoginSuccessResponse | LoginNeedsVerificationResponse;
+
 export type SignupResponse = { message: string; userId: string };
 
 export type VerifyOtpResponse = {
   message: string;
   token: string;
-  user: Omit<LoginResponse, 'token'>;
+  user: Omit<LoginSuccessResponse, 'token'>;
 };
 
 export type MeResponse = {
@@ -80,6 +90,7 @@ export type MeshyTaskPayload = {
   _id: string;
   taskId: string;
   prompt: string;
+  meshyApiKind?: 'text_to_3d' | 'image_to_3d';
   mode: string;
   artStyle?: string;
   texturePrompt?: string;
@@ -88,6 +99,9 @@ export type MeshyTaskPayload = {
   modelUrls?: Record<string, string | undefined>;
   thumbnailUrl?: string;
   errorMessage?: string;
+  /** Preview tasks: Meshy refine task id when auto_refine or manual refine ran. */
+  linkedRefineTaskId?: string;
+  autoRefineError?: string;
   createdAt?: string;
   completedAt?: string;
 };
@@ -96,7 +110,62 @@ export type MeshyGenerateResponse = {
   message: string;
   creditsCharged?: number;
   creditsRemaining?: number | null;
+  /** Backend will start refine after preview succeeds (no second POST from client). */
+  autoRefine?: boolean;
   task: MeshyTaskPayload;
 };
 
 export type MeshyTaskStatusResponse = { task: MeshyTaskPayload };
+
+export type ModelUrlsPayload = {
+  glb?: string;
+  fbx?: string;
+  usdz?: string;
+  obj?: string;
+  mtl?: string;
+  stl?: string;
+};
+
+export type ApiStudioExtra = {
+  id: string;
+  name?: string;
+  modelUrl?: string;
+};
+
+export type ApiProject = {
+  id: string;
+  name: string;
+  description: string;
+  createdAt?: string;
+  updatedAt?: string;
+  status: 'draft' | 'published';
+  modelUrl?: string;
+  thumbnailUrl?: string;
+  meshyPreviewTaskId?: string;
+  meshyTaskId?: string;
+  modelUrls?: ModelUrlsPayload;
+  useCase?: string;
+  category?: string;
+  studioTransforms?: Record<string, unknown>;
+  studioExtras?: ApiStudioExtra[];
+  logoScale?: number;
+  logoOffsetY?: number;
+};
+
+export type ProjectsListResponse = { projects: ApiProject[] };
+export type ProjectOneResponse = { project: ApiProject };
+
+export type ApiChatMessage = {
+  id: string;
+  _id?: string;
+  role: 'user' | 'assistant';
+  content: string;
+  images?: string[];
+  modelUrl?: string;
+  modelUrls?: ModelUrlsPayload;
+  meshyTaskId?: string;
+  createdAt?: string;
+};
+
+export type ChatListResponse = { messages: ApiChatMessage[] };
+export type ChatAppendResponse = { message: ApiChatMessage };

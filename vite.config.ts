@@ -5,6 +5,9 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  /** Backend port: must match backend/.env PORT. Default 5000 often conflicts with macOS AirPlay → 403 AirTunes. */
+  const apiTarget =
+    env.VITE_DEV_API_ORIGIN || `http://127.0.0.1:${env.PORT || '5000'}`;
   return {
     plugins: [react(), tailwindcss()],
     define: {
@@ -43,7 +46,7 @@ export default defineConfig(({mode}) => {
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
         '/api': {
-          target: env.VITE_DEV_API_ORIGIN || 'http://127.0.0.1:5000',
+          target: apiTarget,
           changeOrigin: true,
         },
       },

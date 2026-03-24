@@ -3,6 +3,8 @@ const router = express.Router();
 const { protect } = require('../middlewares/authMiddleware');
 const {
   generate3DModel,
+  generateFromImage,
+  proxyModelAsset,
   getTaskStatus,
   getUserTasks,
   deleteTask,
@@ -16,6 +18,12 @@ router.use(protect);
 // @desc    Create a new 3D generation task
 // @access  Private
 router.post('/generate', generate3DModel);
+
+// @route   POST /api/meshy/generate-from-image
+router.post('/generate-from-image', generateFromImage);
+
+// @route   POST /api/meshy/proxy-asset — same-origin fetch for Meshy CDN (CORS)
+router.post('/proxy-asset', proxyModelAsset);
 
 // @route   GET /api/meshy/tasks
 // @desc    Get all tasks for the authenticated user

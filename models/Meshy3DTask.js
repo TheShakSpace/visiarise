@@ -14,7 +14,13 @@ const meshy3DTaskSchema = new mongoose.Schema(
     },
     prompt: {
       type: String,
-      required: true,
+      default: '',
+    },
+    /** Which Meshy API created this task (polls use different paths). */
+    meshyApiKind: {
+      type: String,
+      enum: ['text_to_3d', 'image_to_3d'],
+      default: 'text_to_3d',
     },
     mode: {
       type: String,
@@ -51,6 +57,10 @@ const meshy3DTaskSchema = new mongoose.Schema(
     },
     thumbnailUrl: String,
     videoUrl: String,
+    /** When generate used auto_refine, Meshy refine task id (client polls this for textured GLB). */
+    linkedRefineTaskId: { type: String, default: '' },
+    /** Set if automatic refine failed after preview succeeded. */
+    autoRefineError: { type: String, default: '' },
     errorMessage: String,
     createdAt: {
       type: Date,

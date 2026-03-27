@@ -50,6 +50,15 @@ const studioProjectSchema = new mongoose.Schema(
     studioExtras: [studioExtraSchema],
     logoScale: Number,
     logoOffsetY: Number,
+    /** When true, `GET /api/projects/share/:id` and hosted GLB are world-readable. */
+    arSharePublic: { type: Boolean, default: false },
+    /** Viewer page heading (falls back to `name`). */
+    arPageTitle: { type: String, default: '' },
+    arPageTagline: { type: String, default: '' },
+    arCtaLabel: { type: String, default: '' },
+    /** Optional `#RRGGBB` accent for the public viewer. */
+    arAccentHex: { type: String, default: '' },
+    arGlbUploadedAt: { type: Date },
   },
   { timestamps: true }
 );

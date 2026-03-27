@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { StudioNodeTransform } from '../store/useAppStore';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { apiUrl } from './api';
 
@@ -27,8 +27,34 @@ export function loadGltf(url: string): Promise<THREE.Group> {
 
 /** Load GLB from Meshy CDN via backend proxy (browser cannot fetch assets.meshy.ai — CORS). */
 export async function loadGltfMeshy(url: string, token: string | null | undefined): Promise<THREE.Group> {
+  const { scene } = await loadGltfMeshyWithAnimations(url, token);
+  return scene;
+}
+
+export type GltfLoadResult = {
+  scene: THREE.Group;
+  animations: THREE.AnimationClip[];
+};
+
+export async function loadGltfWithAnimations(url: string): Promise<GltfLoadResult> {
+  if (url.startsWith('blob:')) {
+    return Promise.reject(
+      new Error(
+        'This model URL was a temporary browser link and no longer works after refresh. Upload the GLB again or pick an asset from your project.'
+      )
+    );
+  }
+  const loader = new GLTFLoader();
+  const gltf: GLTF = await loader.loadAsync(url);
+  return { scene: gltf.scene as THREE.Group, animations: gltf.animations };
+}
+
+export async function loadGltfMeshyWithAnimations(
+  url: string,
+  token: string | null | undefined
+): Promise<GltfLoadResult> {
   if (!MESHY_CDN.test(url)) {
-    return loadGltf(url);
+    return loadGltfWithAnimations(url);
   }
   if (!token) {
     throw new Error('Sign in to load Meshy-hosted models (CDN is proxied by the server).');
@@ -46,10 +72,9 @@ export async function loadGltfMeshy(url: string, token: string | null | undefine
     throw new Error(t || `Proxy failed (${res.status})`);
   }
   const buf = await res.arrayBuffer();
-  /** Use parse — do not pass a blob: URL into `loadGltf` (blob URLs are rejected as stale session links). */
   const loader = new GLTFLoader();
   const gltf = await loader.parseAsync(buf, '');
-  return gltf.scene as THREE.Group;
+  return { scene: gltf.scene as THREE.Group, animations: gltf.animations };
 }
 
 export function arrayBufferToGlbDataUrl(buffer: ArrayBuffer): string {

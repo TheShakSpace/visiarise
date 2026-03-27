@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useSearchParams } from 'react-router-dom';
 import { useAppStore, MarketplaceItem } from '../store/useAppStore';
 import { 
   Search, 
@@ -27,11 +28,50 @@ import { Link } from 'react-router-dom';
 import { buildTryArUrl } from '../lib/demoAssets';
 
 export default function Marketplace() {
-  const { marketplaceItems, addToCart, cart, removeFromCart } = useAppStore();
+  const { marketplaceItems, addToCart, cart, removeFromCart, addMarketplaceItem } = useAppStore();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutSuccess, setIsCheckoutSuccess] = useState(false);
+  const [listModalOpen, setListModalOpen] = useState(false);
+  const [listForm, setListForm] = useState({
+    name: '',
+    description: '',
+    price: '29',
+    category: 'models',
+    thumbnailUrl: '/Human_Avatar_Dhruv_Chaturvedi_img.png',
+    modelUrl: '/Human_Avatar_Dhruv_Chaturvedi_model.glb',
+  });
+  const [listStatus, setListStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (searchParams.get('list') === '1') {
+      setListModalOpen(true);
+      const pid = searchParams.get('project');
+      if (pid) {
+        try {
+          const raw = sessionStorage.getItem(`visiarise-listing-${pid}`);
+          if (raw) {
+            const d = JSON.parse(raw) as { name?: string; description?: string; modelUrl?: string; thumb?: string };
+            setListForm((f) => ({
+              ...f,
+              name: d.name || f.name,
+              description: d.description || f.description,
+              modelUrl: d.modelUrl || f.modelUrl,
+              thumbnailUrl: d.thumb || f.thumbnailUrl,
+            }));
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      const next = new URLSearchParams(searchParams);
+      next.delete('list');
+      next.delete('project');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const handleCheckout = () => {
     setIsCheckoutSuccess(true);
@@ -39,6 +79,33 @@ export default function Marketplace() {
       setIsCheckoutSuccess(false);
       setIsCartOpen(false);
     }, 3000);
+  };
+
+  const submitListing = (e: React.FormEvent) => {
+    e.preventDefault();
+    const price = parseFloat(listForm.price);
+    if (!listForm.name.trim() || Number.isNaN(price) || price <= 0) {
+      setListStatus('Add a title and valid price.');
+      return;
+    }
+    const item: MarketplaceItem = {
+      id: `creator-${Date.now()}`,
+      name: listForm.name.trim(),
+      description: listForm.description.trim() || 'Listed from VisiARise Ardya / Studio.',
+      price,
+      creator: 'You · VisiARise',
+      thumbnailUrl: listForm.thumbnailUrl.trim() || '/Human_Avatar_Dhruv_Chaturvedi_img.png',
+      modelUrl: listForm.modelUrl.trim() || '/Human_Avatar_Dhruv_Chaturvedi_model.glb',
+      category: listForm.category,
+      rating: 5,
+      sales: 0,
+    };
+    addMarketplaceItem(item);
+    setListStatus('Listing published to this catalog (demo).');
+    window.setTimeout(() => {
+      setListModalOpen(false);
+      setListStatus(null);
+    }, 1400);
   };
 
   const filteredItems = useMemo(() => {
@@ -86,7 +153,11 @@ export default function Marketplace() {
             </p>
             
             <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
-              <button className="w-full sm:w-auto btn-neon-purple flex items-center justify-center gap-3 group">
+              <button
+                type="button"
+                onClick={() => setListModalOpen(true)}
+                className="w-full sm:w-auto btn-neon-purple flex items-center justify-center gap-3 group"
+              >
                 <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform" />
                 List Your Model
               </button>
@@ -148,6 +219,124 @@ export default function Marketplace() {
           ))}
         </motion.div>
       </section>
+
+      <AnimatePresence>
+        {listModalOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[110]"
+              onClick={() => setListModalOpen(false)}
+              aria-hidden
+            />
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="marketplace-list-glb-title"
+              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12 }}
+              className="fixed left-1/2 top-[8%] z-[120] w-[min(100%\\,440px)] -translate-x-1/2 rounded-2xl border border-white/10 bg-[#111] p-6 shadow-2xl max-h-[85vh] overflow-y-auto pointer-events-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <h2 id="marketplace-list-glb-title" className="text-lg font-bold font-display">
+                    List a GLB
+                  </h2>
+                  <p className="text-[11px] text-white/45 mt-1">
+                    Creator listing (demo) — appears in the catalog below for your session.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setListModalOpen(false);
+                  }}
+                  className="relative z-10 p-2 rounded-xl hover:bg-white/10 text-white/40 hover:text-white"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={submitListing} className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-white/35">Title</label>
+                  <input
+                    required
+                    value={listForm.name}
+                    onChange={(e) => setListForm((f) => ({ ...f, name: e.target.value }))}
+                    className="mt-1 w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm"
+                    placeholder="e.g. Concept sneaker — PBR"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-white/35">Description</label>
+                  <textarea
+                    value={listForm.description}
+                    onChange={(e) => setListForm((f) => ({ ...f, description: e.target.value }))}
+                    rows={3}
+                    className="mt-1 w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm"
+                    placeholder="Polycount, rig, license notes…"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-white/35">Price USD</label>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={listForm.price}
+                      onChange={(e) => setListForm((f) => ({ ...f, price: e.target.value }))}
+                      className="mt-1 w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-white/35">Category</label>
+                    <select
+                      value={listForm.category}
+                      onChange={(e) => setListForm((f) => ({ ...f, category: e.target.value }))}
+                      className="mt-1 w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-sm"
+                    >
+                      <option value="models">3D models</option>
+                      <option value="characters">Characters</option>
+                      <option value="product">Product viz</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-white/35">
+                    GLB URL (public path)
+                  </label>
+                  <input
+                    value={listForm.modelUrl}
+                    onChange={(e) => setListForm((f) => ({ ...f, modelUrl: e.target.value }))}
+                    className="mt-1 w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-xs font-mono"
+                    placeholder="/models/your.glb"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-white/35">Poster image URL</label>
+                  <input
+                    value={listForm.thumbnailUrl}
+                    onChange={(e) => setListForm((f) => ({ ...f, thumbnailUrl: e.target.value }))}
+                    className="mt-1 w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-xs font-mono"
+                  />
+                </div>
+                {listStatus && <p className="text-xs text-emerald-400/90">{listStatus}</p>}
+                <button type="submit" className="btn-neon-purple w-full py-3 text-sm">
+                  Publish listing
+                </button>
+              </form>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Cart Sidebar */}
       <AnimatePresence>
@@ -304,7 +493,11 @@ export default function Marketplace() {
                   </div>
                 </div>
               </div>
-              <button className="btn-neon-purple px-12 py-6 flex items-center gap-3 group">
+              <button
+                type="button"
+                onClick={() => setListModalOpen(true)}
+                className="btn-neon-purple px-12 py-6 flex items-center gap-3 group"
+              >
                 Start Selling Today
                 <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </button>
@@ -396,7 +589,10 @@ function ModelCard({ item, onAddToCart }: { item: MarketplaceItem; onAddToCart: 
             className="h-full w-full"
           />
         </Link>
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-transparent to-transparent opacity-80 pointer-events-none" />
+        <div
+          className="absolute inset-0 opacity-80 pointer-events-none"
+          style={{ background: 'linear-gradient(to top, #0a0a0a, transparent)' }}
+        />
         
         <div className="absolute top-6 right-6 flex gap-2">
           <span className="px-4 py-1.5 rounded-full bg-black/50 backdrop-blur-xl border border-white/10 text-[10px] font-bold uppercase tracking-widest text-white/60">

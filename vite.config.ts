@@ -1,7 +1,56 @@
+import fs from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import type {ViteDevServer} from 'vite';
 import {defineConfig, loadEnv} from 'vite';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const demoRoot = path.resolve(__dirname, 'Demo');
+
+/** Serve `Demo/index.html` + local GLBs at `/Demo/*` during dev (folder lives at repo root, outside `public/`). */
+function demoFolderPlugin() {
+  return {
+    name: 'visiarise-demo-folder',
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use((req, res, next) => {
+        if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+        const u = req.url?.split('?')[0] ?? '';
+        if (!u.startsWith('/Demo')) return next();
+        const relRaw = u.slice('/Demo'.length).replace(/^\/+/, '') || 'index.html';
+        let rel: string;
+        try {
+          rel = decodeURIComponent(relRaw);
+        } catch {
+          return next();
+        }
+        const candidate = path.resolve(demoRoot, rel);
+        const demoResolved = path.resolve(demoRoot);
+        const relToDemo = path.relative(demoResolved, candidate);
+        if (relToDemo.startsWith('..') || path.isAbsolute(relToDemo)) return next();
+        let stat: fs.Stats;
+        try {
+          stat = fs.statSync(candidate);
+        } catch {
+          return next();
+        }
+        if (!stat.isFile()) return next();
+        const mime = candidate.endsWith('.html')
+          ? 'text/html; charset=utf-8'
+          : candidate.endsWith('.glb')
+            ? 'model/gltf-binary'
+            : 'application/octet-stream';
+        res.setHeader('Content-Type', mime);
+        if (req.method === 'HEAD') {
+          res.end();
+          return;
+        }
+        fs.createReadStream(candidate).pipe(res);
+      });
+    },
+  };
+}
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
@@ -9,7 +58,7 @@ export default defineConfig(({mode}) => {
   const apiTarget =
     env.VITE_DEV_API_ORIGIN || `http://127.0.0.1:${env.PORT || '5000'}`;
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [demoFolderPlugin(), react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },

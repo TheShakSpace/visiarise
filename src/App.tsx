@@ -24,9 +24,11 @@ const Marketplace = lazy(() => import('./pages/Marketplace'));
 const ARViewer = lazy(() => import('./pages/ARViewer'));
 const FreelancersHub = lazy(() => import('./pages/FreelancersHub'));
 const Community = lazy(() => import('./pages/Community'));
+const LearnPage = lazy(() => import('./pages/LearnPage'));
 const SustainabilityPage = lazy(() => import('./pages/SustainabilityPage'));
 const MarketplaceProduct = lazy(() => import('./pages/MarketplaceProduct'));
 const Cart = lazy(() => import('./pages/Cart'));
+const PricingPage = lazy(() => import('./pages/PricingPage'));
 
 export default function App() {
   const { user, onboardingCompleted, setOnboardingCompleted } = useAppStore();
@@ -66,9 +68,11 @@ export default function App() {
               <Route path="/marketplace" element={<Marketplace />} />
               <Route path="/product/:id" element={<MarketplaceProduct />} />
               <Route path="/cart" element={<Cart />} />
+              <Route path="/pricing" element={<PricingPage />} />
               <Route path="/sustainability" element={<SustainabilityPage />} />
               <Route path="/freelancers" element={<FreelancersHub />} />
-              <Route path="/learn" element={<Community />} />
+              <Route path="/learn" element={<LearnPage />} />
+              <Route path="/community" element={<Community />} />
               <Route path="/try-ar" element={<ARViewer />} />
               <Route path="/ar/:id" element={<ARViewer />} />
             </Routes>

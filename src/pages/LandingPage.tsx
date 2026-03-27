@@ -38,6 +38,9 @@ import { apiFetch } from '../lib/api';
 
 gsap.registerPlugin(ScrollTrigger, ScrollToPlugin);
 
+/** Fewer main-thread blur repaints during scroll (blur is very expensive to animate). */
+ScrollTrigger.config({ ignoreMobileResize: true });
+
 /** Demo timings in ms (0.5× = half the wait vs earlier = ~2× faster overall) */
 const DEMO_MS = {
   intro: 700,
@@ -172,11 +175,11 @@ function HeroStaticDemoCard({
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
-      className="demo-ardya-glass relative isolate z-10 flex h-[min(340px,min(52vh,62dvh))] w-full max-w-full flex-col overflow-hidden rounded-[1.75rem] sm:h-[min(400px,min(58vh,70dvh))] sm:max-w-md sm:rounded-[2rem] lg:h-[min(560px,min(72vh,80dvh))]"
+      className="demo-ardya-glass relative isolate z-10 flex h-[min(340px\\,52vh)] w-full max-w-full flex-col overflow-hidden rounded-[1.75rem] sm:h-[min(400px\\,58vh)] sm:max-w-md sm:rounded-[2rem] lg:h-[min(560px\\,72vh)]"
     >
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-22 bg-[radial-gradient(ellipse_at_50%_0%,rgba(255,255,255,0.05)_0%,transparent_55%)]"
+        className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-22 bg-[radial-gradient(ellipse_at_50%_0%\\,rgb(255_255_255_/_0.05)_0%\\,transparent_55%)]"
       />
       <div className="demo-ardya-glass__header relative z-10 flex shrink-0 flex-col gap-1 border-b border-white/[0.09] p-4 sm:p-5">
         <ArdyaWordmark />
@@ -278,25 +281,6 @@ export default function LandingPage() {
       setContactLoading(false);
     }
   }, [contactName, contactEmail, contactMessage]);
-
-  const [section2SceneReady, setSection2SceneReady] = useState(false);
-  const section2SentinelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = section2SentinelRef.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      ([e]) => {
-        if (e?.isIntersecting) {
-          setSection2SceneReady(true);
-          obs.disconnect();
-        }
-      },
-      { root: null, rootMargin: '320px 0px 240px 0px', threshold: 0.01 }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
 
   /** Skip hero → #ecosystem (“One platform, several ideas”) — not the GLB block (#section-2) */
   const skipHeroDeck = useCallback(() => {
@@ -413,7 +397,7 @@ export default function LandingPage() {
       },
       {
         root: null,
-        threshold: [0.12, 0.22, 0.35, 0.5, 0.65, 0.8],
+        threshold: [0.2, 0.45, 0.72],
         rootMargin: narrow ? '-2% 0px -4% 0px' : '-8% 0px -12% 0px',
       }
     );
@@ -440,32 +424,36 @@ export default function LandingPage() {
     let mm: { revert: () => void } | undefined;
     let heroDeckMm: { revert: () => void } | undefined;
     const ctx = gsap.context(() => {
-      gsap.to(droneRef.current, {
-        scrollTrigger: {
-          trigger: "#section-2",
-          start: "top bottom",
-          end: "top center",
-          scrub: true,
-        },
-        opacity: 0,
-        scale: 0.5,
-        filter: "blur(10px)",
-      });
+      if (droneRef.current) {
+        gsap.to(droneRef.current, {
+          scrollTrigger: {
+            trigger: "#section-2",
+            start: "top bottom",
+            end: "top center",
+            scrub: 0.35,
+            fastScrollEnd: true,
+          },
+          opacity: 0,
+          scale: 0.92,
+          force3D: true,
+        });
+      }
 
       gsap.fromTo(
         ".reveal-drone-inner",
-        { opacity: 0, y: 20, filter: "blur(8px)" },
+        { opacity: 0, y: 24 },
         {
           scrollTrigger: {
             trigger: "#section-2",
             start: "top 78%",
             end: "top 48%",
             scrub: 0.45,
+            fastScrollEnd: true,
           },
           opacity: 1,
           y: 0,
-          filter: "blur(0px)",
           ease: "none",
+          force3D: true,
         }
       );
 
@@ -481,6 +469,7 @@ export default function LandingPage() {
           const tween = gsap.to(heroTrack, {
             xPercent: deckShiftPct,
             ease: "none",
+            force3D: true,
             scrollTrigger: {
               id: "hero-deck",
               trigger: heroSection,
@@ -488,27 +477,27 @@ export default function LandingPage() {
               end: () =>
                 `+=${Math.round(window.innerHeight * (window.innerWidth < 768 ? 1.35 : 1.65))}`,
               pin: true,
-              scrub: 0.15,
+              scrub: 0.45,
               invalidateOnRefresh: true,
-              anticipatePin: 1,
+              anticipatePin: 0,
+              fastScrollEnd: true,
               snap: {
                 snapTo: snapInc,
-                duration: { min: 0.12, max: 0.32 },
+                duration: { min: 0.1, max: 0.22 },
                 delay: 0,
                 ease: "power2.out",
                 inertia: false,
               },
               onUpdate: (self) => {
-                const dots = heroDotsRef.current?.querySelectorAll("[data-hero-dot]");
                 const p = self.progress;
                 const idx = Math.min(
                   deckSteps - 1,
                   Math.max(0, Math.round(p / snapInc))
                 );
-                if (idx !== lastDeckIdx) {
-                  lastDeckIdx = idx;
-                  setHeroActivePanel(idx);
-                }
+                if (idx === lastDeckIdx) return;
+                lastDeckIdx = idx;
+                setHeroActivePanel(idx);
+                const dots = heroDotsRef.current?.querySelectorAll("[data-hero-dot]");
                 dots?.forEach((el, i) => {
                   el.classList.toggle("is-active", i === idx);
                 });
@@ -541,17 +530,18 @@ export default function LandingPage() {
           gsap.utils.toArray(".reveal").forEach((block) => {
             gsap.fromTo(
               block as gsap.TweenTarget,
-              { opacity: 0.2, y: 44, filter: "blur(14px)" },
+              { opacity: 0.25, y: 36 },
               {
                 opacity: 1,
                 y: 0,
-                filter: "blur(0px)",
                 ease: "none",
+                force3D: true,
                 scrollTrigger: {
                   trigger: block as gsap.DOMTarget,
                   start: "top 88%",
                   end: "top 52%",
                   scrub: 0.55,
+                  fastScrollEnd: true,
                 },
               }
             );
@@ -573,10 +563,12 @@ export default function LandingPage() {
             scrollTrigger: {
               trigger: ".stat-card",
               start: "top bottom",
-              scrub: true,
+              scrub: 0.6,
+              fastScrollEnd: true,
             },
             y: -50,
             stagger: 0.1,
+            force3D: true,
           });
 
           return () => {};
@@ -599,7 +591,7 @@ export default function LandingPage() {
         e.stopPropagation();
         skipHeroDeck();
       }}
-      className="pointer-events-auto fixed right-4 top-[max(6.5rem,env(safe-area-inset-top)+5rem)] z-[200] flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-md transition-colors hover:border-white/28 hover:bg-black/85 sm:right-8 sm:top-[max(7rem,env(safe-area-inset-top)+5.25rem)]"
+      className="pointer-events-auto fixed right-4 top-[max(6.5rem\\,env(safe-area-inset-top)+5rem)] z-[200] flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white shadow-[0_8px_32px_rgb(0_0_0_/_0.45)] backdrop-blur-md transition-colors hover:border-white/28 hover:bg-black/85 sm:right-8 sm:top-[max(7rem\\,env(safe-area-inset-top)+5.25rem)]"
     >
       <SkipForward className="h-3.5 w-3.5 opacity-90" strokeWidth={2} />
       Skip intro
@@ -615,7 +607,7 @@ export default function LandingPage() {
       <div className="fixed inset-0 z-0 pointer-events-none">
         {/* Keep subtle — high opacity reads as a gray/purple band over semi-transparent sections */}
         <div className="absolute inset-0 noise-bg opacity-[0.045]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,rgba(255,255,255,0.06)_0%,transparent_55%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%\\,rgb(255_255_255_/_0.06)_0%\\,transparent_55%)]" />
       </div>
 
       {/* 1. Hero — pinned horizontal deck: 4 screens (demo + VisiARise story each) */}
@@ -644,8 +636,8 @@ export default function LandingPage() {
           )}
           <div className="absolute inset-0 bg-black/68" aria-hidden />
           <div className="absolute inset-0 bg-gradient-to-b from-black/88 via-zinc-950/58 to-black/94" aria-hidden />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_28%,rgba(255,255,255,0.06)_0%,transparent_58%)]" aria-hidden />
-          <div className="absolute inset-0 bg-[linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.025)_50%,transparent_100%)]" aria-hidden />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_28%\\,rgb(255_255_255_/_0.06)_0%\\,transparent_58%)]" aria-hidden />
+          <div className="absolute inset-0 bg-[linear-gradient(90deg\\,transparent_0%\\,rgb(255_255_255_/_0.025)_50%\\,transparent_100%)]" aria-hidden />
         </div>
 
         <div
@@ -742,12 +734,12 @@ export default function LandingPage() {
                       className={
                         deckIsHorizontal
                           ? 'relative z-10 order-2 flex min-h-[520px] w-full items-stretch justify-center sm:min-h-[600px] lg:order-none lg:min-h-[640px]'
-                          : 'relative z-10 order-2 flex min-h-[min(22rem,52vh)] w-full items-stretch justify-center sm:min-h-[min(24rem,50vh)] lg:order-none'
+                          : 'relative z-10 order-2 flex min-h-[min(22rem\\,52vh)] w-full items-stretch justify-center sm:min-h-[min(24rem\\,50vh)] lg:order-none'
                       }
                     >
                       <motion.div
                         aria-hidden
-                        className="pointer-events-none absolute inset-0 max-lg:left-1/2 max-lg:w-[min(100%,520px)] max-lg:-translate-x-1/2 scale-110 rounded-full bg-zinc-950/30 opacity-30 blur-[88px]"
+                        className="pointer-events-none absolute inset-0 max-lg:left-1/2 max-lg:w-[min(100%\\,520px)] max-lg:-translate-x-1/2 scale-110 rounded-full bg-zinc-950/30 opacity-30 blur-[88px]"
                         animate={{ opacity: [0.16, 0.26, 0.16] }}
                         transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
                       />
@@ -765,7 +757,7 @@ export default function LandingPage() {
                                   onClick={() => setDemoIndex(i)}
                                   className={`group flex flex-col gap-1.5 rounded-xl border p-1.5 text-left transition-all ${
                                     i === demoIndex
-                                      ? "border-white/35 bg-white/[0.09] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+                                      ? "border-white/35 bg-white/[0.09] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.06)]"
                                       : "border-white/[0.1] bg-black/25 hover:border-white/22"
                                   }`}
                                 >
@@ -792,17 +784,17 @@ export default function LandingPage() {
                           transition={{ duration: 1, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
                           className={
                             deckIsHorizontal
-                              ? 'demo-ardya-glass relative isolate z-10 flex h-[min(520px,min(70vh,80dvh))] w-full max-w-full flex-col overflow-hidden rounded-[1.75rem] sm:rounded-[2rem]'
-                              : 'demo-ardya-glass relative isolate z-10 flex h-[min(400px,min(58dvh,68vh))] w-full max-w-full flex-col overflow-hidden rounded-[1.75rem] sm:rounded-[2rem]'
+                              ? 'demo-ardya-glass relative isolate z-10 flex h-[min(520px\\,70vh)] w-full max-w-full flex-col overflow-hidden rounded-[1.75rem] sm:rounded-[2rem]'
+                              : 'demo-ardya-glass relative isolate z-10 flex h-[min(400px\\,58dvh)] w-full max-w-full flex-col overflow-hidden rounded-[1.75rem] sm:rounded-[2rem]'
                           }
                         >
                           <div
                             aria-hidden
-                            className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-22 bg-[radial-gradient(ellipse_at_50%_0%,rgba(255,255,255,0.05)_0%,transparent_55%)]"
+                            className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-22 bg-[radial-gradient(ellipse_at_50%_0%\\,rgb(255_255_255_/_0.05)_0%\\,transparent_55%)]"
                           />
                           <div
                             aria-hidden
-                            className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-16 bg-[radial-gradient(ellipse_at_100%_100%,rgba(255,255,255,0.03)_0%,transparent_45%)]"
+                            className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-16 bg-[radial-gradient(ellipse_at_100%_100%\\,rgb(255_255_255_/_0.03)_0%\\,transparent_45%)]"
                           />
                           <div className="demo-ardya-glass__header relative z-10 flex shrink-0 flex-col gap-3 border-b border-white/[0.09] p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-3 sm:p-5">
                             <div className="flex min-w-0 flex-col gap-0.5">
@@ -810,7 +802,7 @@ export default function LandingPage() {
                               <div className="text-[9px] font-medium tracking-wide text-white/45">Text & image → AR</div>
                               <div className="flex items-center gap-2 text-[10px] font-medium text-white/55">
                                 <span
-                                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/55 shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
+                                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/55 shadow-[0_0_0_1px_rgb(255_255_255_/_0.12)]"
                                   aria-hidden
                                 />
                                 Online
@@ -987,7 +979,7 @@ export default function LandingPage() {
                               )}
                             </div>
                             <div
-                              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-[0_2px_12px_rgba(0,0,0,0.35)] transition-colors ${
+                              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-[0_2px_12px_rgb(0_0_0_/_0.35)] transition-colors ${
                                 demoPhase === 0 && inputText.length === activeDemo.prompt.length
                                   ? "bg-gradient-to-b from-zinc-100 to-zinc-400"
                                   : "bg-gradient-to-b from-zinc-200 to-zinc-500"
@@ -1012,7 +1004,7 @@ export default function LandingPage() {
         {/* Slide dots only — vertical stack, left corner (GSAP toggles .is-active via heroDotsRef) */}
         <div
           ref={heroDotsRef}
-          className="pointer-events-none absolute bottom-[max(6.25rem,env(safe-area-inset-bottom))] left-4 z-20 flex flex-col gap-2 sm:left-5 lg:bottom-auto lg:left-8 lg:top-[44%] lg:-translate-y-1/2 xl:left-10"
+          className="pointer-events-none absolute left-4 z-20 flex flex-col gap-2 sm:left-5 [bottom:max(6.25rem\\,env(safe-area-inset-bottom))] lg:bottom-auto lg:left-8 lg:top-[44%] lg:-translate-y-1/2 xl:left-10"
           aria-hidden
         >
           {deckIsHorizontal &&
@@ -1025,8 +1017,8 @@ export default function LandingPage() {
         <div
           className={`pointer-events-none absolute left-1/2 z-20 flex -translate-x-1/2 flex-col items-center ${
             deckIsHorizontal
-              ? 'bottom-[max(1.25rem,env(safe-area-inset-bottom))] sm:bottom-8'
-              : 'bottom-[max(0.75rem,env(safe-area-inset-bottom))] sm:bottom-6'
+              ? '[bottom:max(1.25rem\\,env(safe-area-inset-bottom))] sm:bottom-8'
+              : '[bottom:max(0.75rem\\,env(safe-area-inset-bottom))] sm:bottom-6'
           }`}
         >
           <motion.div
@@ -1157,30 +1149,19 @@ export default function LandingPage() {
   id="section-2"
   className="relative z-10 min-h-0 scroll-mt-[5.5rem] sm:scroll-mt-28 lg:min-h-screen border-t border-white/[0.06] bg-black px-4 sm:px-6 md:px-12 lg:px-16 xl:px-24 py-14 sm:py-20 md:py-24"
 >
-  <div
-    ref={section2SentinelRef}
-    className="pointer-events-none absolute left-0 top-0 h-px w-px opacity-0"
-    aria-hidden
-  />
   <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 sm:gap-12 lg:gap-16 xl:gap-20 items-stretch w-full max-w-[1600px] mx-auto relative z-10">
 
-    {/* 3D viewer — mount WebGL only when near viewport to help low-end / slow networks */}
+    {/* 3D viewer — mounted with page; model loads inside Canvas (Suspense fallback is null) */}
     <div className="relative w-full h-[52vh] min-h-[280px] sm:h-[60vh] sm:min-h-[320px] lg:h-auto lg:min-h-[720px] reveal-drone order-2 lg:order-none">
 
       <div className="absolute inset-0 w-full h-full reveal-drone-inner bg-zinc-950/80">
-        {section2SceneReady ? (
-          <DroneScene
-            frame="section"
-            modelUrl="models/ironman_basic_pbr.glb"
-            modelScale={0.5}
-            interactive
-            className="absolute inset-0 w-full h-full"
-          />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold uppercase tracking-[0.2em] text-white/25">
-            Loading viewer…
-          </div>
-        )}
+        <DroneScene
+          frame="section"
+          modelUrl="models/ironman_basic_pbr.glb"
+          modelScale={0.5}
+          interactive
+          className="absolute inset-0 w-full h-full"
+        />
       </div>
 
     </div>
@@ -1208,7 +1189,7 @@ export default function LandingPage() {
           'Pair with sustainability: fewer physical iterations',
         ].map((feature, i) => (
           <div key={i} className="flex items-center gap-4 text-white/80">
-            <div className="w-1.5 h-1.5 rounded-full bg-brand-primary shadow-[0_0_8px_rgba(255,255,255,0.35)]" />
+            <div className="w-1.5 h-1.5 rounded-full bg-brand-primary shadow-[0_0_8px_rgb(255_255_255_/_0.35)]" />
             <span className="text-sm font-medium tracking-wide">{feature}</span>
           </div>
         ))}
@@ -1283,9 +1264,13 @@ export default function LandingPage() {
       {/* 4. Sustainability — honest positioning */}
       <section
         id="sustainability"
-        className="relative z-10 border-t border-white/[0.06] bg-gradient-to-b from-[#050210] via-emerald-950/10 to-brand-bg py-16 sm:py-24 md:py-32 px-4 sm:px-6 md:px-20 overflow-hidden"
+        className="relative z-10 border-t border-white/[0.06] py-16 sm:py-24 md:py-32 px-4 sm:px-6 md:px-20 overflow-hidden"
+        style={{
+          background:
+            'linear-gradient(to bottom, #050210, rgba(6, 78, 59, 0.1), var(--color-brand-bg, #0a0a0b))',
+        }}
       >
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(100vw,800px)] h-[min(100vw,800px)] max-w-[800px] max-h-[800px] bg-green-500/5 blur-[150px] rounded-full pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(100vw\\,800px)] h-[min(100vw\\,800px)] max-w-[800px] max-h-[800px] bg-green-500/5 blur-[150px] rounded-full pointer-events-none" />
         <div className="max-w-5xl mx-auto relative z-10">
           <div className="text-center mb-12 sm:mb-16 reveal">
             <Leaf className="w-10 h-10 sm:w-12 sm:h-12 text-emerald-400/90 mx-auto mb-6 sm:mb-8" />
@@ -1362,7 +1347,7 @@ export default function LandingPage() {
                   <motion.div 
                     animate={{ scale: [1, 1.2, 1] }}
                     transition={{ duration: 2, repeat: Infinity }}
-                    className="w-16 h-16 rounded-full bg-gradient-to-b from-zinc-200 to-zinc-500 flex items-center justify-center shadow-[0_0_28px_rgba(255,255,255,0.2)]"
+                    className="w-16 h-16 rounded-full bg-gradient-to-b from-zinc-200 to-zinc-500 flex items-center justify-center shadow-[0_0_28px_rgb(255_255_255_/_0.2)]"
                   >
                     <MousePointer2 className="w-8 h-8 text-zinc-900" />
                   </motion.div>
@@ -1478,13 +1463,13 @@ export default function LandingPage() {
       {/* 6. CTA: The Final Hook */}
       <section id="contact" className="relative z-10 border-t border-white/[0.06] bg-gradient-to-b from-zinc-950/80 via-brand-bg to-[#030010] py-20 sm:py-32 md:py-48 px-4 sm:px-6 md:px-20 text-center reveal">
         <div className="absolute inset-0 z-0 pointer-events-none">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(100vw,720px)] h-[min(100vw,720px)] bg-teal-500/[0.07] blur-[140px] rounded-full opacity-70" />
-          <div className="absolute top-1/3 right-1/4 w-[min(80vw,480px)] h-[min(80vw,480px)] bg-white/[0.04] blur-[100px] rounded-full opacity-60" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(100vw\\,720px)] h-[min(100vw\\,720px)] bg-teal-500/[0.07] blur-[140px] rounded-full opacity-70" />
+          <div className="absolute top-1/3 right-1/4 w-[min(80vw\\,480px)] h-[min(80vw\\,480px)] bg-white/[0.04] blur-[100px] rounded-full opacity-60" />
         </div>
         <div className="relative z-10 max-w-4xl mx-auto">
-          <h2 className="text-[clamp(2.25rem,10vw,8rem)] md:text-9xl font-display font-bold tracking-tighter mb-8 sm:mb-12 leading-[1.02] text-white px-1">
+          <h2 className="text-[clamp(2.25rem\\,10vw\\,8rem)] md:text-9xl font-display font-bold tracking-tighter mb-8 sm:mb-12 leading-[1.02] text-white px-1">
             The Future is <br />{' '}
-            <span className="text-transparent bg-clip-text bg-gradient-to-br from-zinc-100 via-teal-100/95 to-zinc-400 drop-shadow-[0_0_24px_rgba(45,212,191,0.15)]">
+            <span className="text-transparent bg-clip-text bg-gradient-to-br from-zinc-100 via-teal-100/95 to-zinc-400 drop-shadow-[0_0_24px_rgb(45_212_191_/_0.15)]">
               Augmented
             </span>
           </h2>

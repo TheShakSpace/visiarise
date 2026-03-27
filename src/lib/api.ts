@@ -147,6 +147,7 @@ export type ApiProject = {
   useCase?: string;
   category?: string;
   studioTransforms?: Record<string, unknown>;
+  studioRigs?: Record<string, unknown>;
   studioExtras?: ApiStudioExtra[];
   logoScale?: number;
   logoOffsetY?: number;
@@ -154,6 +155,20 @@ export type ApiProject = {
 
 export type ProjectsListResponse = { projects: ApiProject[] };
 export type ProjectOneResponse = { project: ApiProject };
+
+export type FreelancerJobDto = {
+  id: string;
+  title: string;
+  company: string;
+  location: string;
+  type: string;
+  budget: string;
+  posted?: string;
+};
+
+export type FreelancerJobsResponse = { jobs: FreelancerJobDto[] };
+
+export type FreelancerApplyResponse = { message: string; applicationId: string };
 
 export type ApiChatMessage = {
   id: string;

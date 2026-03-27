@@ -40,7 +40,7 @@ export default function MarketplaceProduct() {
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            className="rounded-[2rem] overflow-hidden border border-white/10 bg-white/[0.02] aspect-[4/5] max-h-[min(80vh,720px)]"
+            className="rounded-[2rem] overflow-hidden border border-white/10 bg-white/[0.02] aspect-[4/5] max-h-[min(80vh\\,720px)]"
           >
             <MarketplaceModelPreview src={item.modelUrl} poster={item.thumbnailUrl} className="h-full" />
           </motion.div>

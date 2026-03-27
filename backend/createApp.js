@@ -4,6 +4,7 @@ const authRoutes = require('./routes/authRoute');
 const meshyRoutes = require('./routes/meshyRoute');
 const projectRoutes = require('./routes/projectRoute');
 const contactRoutes = require('./routes/contactRoute');
+const freelancerRoutes = require('./routes/freelancerRoute');
 
 function createApp() {
   const app = express();
@@ -15,6 +16,7 @@ function createApp() {
   app.use('/api/meshy', meshyRoutes);
   app.use('/api/projects', projectRoutes);
   app.use('/api/contact', contactRoutes);
+  app.use('/api/freelancers', freelancerRoutes);
 
   app.get('/health', (req, res) => {
     res.json({

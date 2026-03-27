@@ -36,9 +36,27 @@ async function ensureCreditsField(user) {
 }
 
 exports.registerUser = async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, referralCode } = req.body;
   const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
   const emailLower = (email || '').toLowerCase().trim();
+
+  const masterCode = (process.env.REFERRAL_MASTER_CODE || 'AdminDhruv100%').trim();
+  const referralBonus = Number(process.env.REFERRAL_BONUS_CREDITS || 500);
+  const trimmedReferral =
+    typeof referralCode === 'string' && referralCode.trim() ? referralCode.trim() : '';
+  const isAdminEmail = !!(adminEmail && emailLower === adminEmail);
+
+  /** Full platform access requires the official referral code — except bootstrap ADMIN_EMAIL. */
+  if (!isAdminEmail) {
+    if (!trimmedReferral || trimmedReferral !== masterCode) {
+      return res.status(400).json({
+        message:
+          'A valid VisiARise referral code is required for full access. Use the code provided by your administrator.',
+      });
+    }
+  }
+  const referralCodeApplied = trimmedReferral === masterCode ? trimmedReferral : isAdminEmail ? 'ADMIN_EMAIL' : null;
+  const bonusCredits = trimmedReferral === masterCode ? referralBonus : 0;
 
   try {
     const userExists = await User.findOne({ email: emailLower });
@@ -53,7 +71,8 @@ exports.registerUser = async (req, res) => {
       password,
       otp,
       otpExpiry,
-      credits: defaultCredits(),
+      credits: defaultCredits() + bonusCredits,
+      referralCodeApplied,
     };
 
     if (adminEmail && emailLower === adminEmail) {

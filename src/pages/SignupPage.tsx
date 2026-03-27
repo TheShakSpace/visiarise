@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, ArrowRight, Github, Chrome, User, Sparkles } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Github, Chrome, User, Sparkles, Gift } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { DEMO_EMAIL, DEMO_PASSWORD } from '../constants/demo';
 import AuthSplitLayout from '../components/AuthSplitLayout';
@@ -14,6 +14,7 @@ export default function SignupPage() {
   const [name, setName] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [otp, setOtp] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -46,6 +47,7 @@ export default function SignupPage() {
           name: name.trim(),
           email: email.trim().toLowerCase(),
           password,
+          referralCode: referralCode.trim(),
         }),
       });
       setUserId(res.userId);
@@ -144,6 +146,25 @@ export default function SignupPage() {
                 className="w-full bg-black/40 border border-white/[0.08] rounded-2xl py-3.5 pl-12 pr-4 text-sm placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500/30 transition-all"
               />
             </div>
+          </div>
+
+          <div className="rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-violet-500/5 p-4 space-y-2">
+            <label className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-amber-200/90">
+              <Gift className="w-4 h-4" />
+              Referral code (required for full access)
+            </label>
+            <input
+              type="text"
+              required
+              value={referralCode}
+              onChange={(e) => setReferralCode(e.target.value)}
+              placeholder="Official VisiARise referral code"
+              autoComplete="off"
+              className="w-full bg-black/50 border border-amber-500/25 rounded-xl py-3.5 px-4 text-sm placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+            />
+            <p className="text-[10px] text-white/45 leading-relaxed">
+              Accounts without a valid code cannot be created. Your code is stored securely and never shown publicly.
+            </p>
           </div>
 
           <button

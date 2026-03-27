@@ -37,6 +37,16 @@ export type StudioNodeTransform = {
   scale: [number, number, number];
 };
 
+/** Preview motion on a scene object (editor + optional persist). */
+export type StudioRigConfig = {
+  enabled: boolean;
+  mode: 'none' | 'rotate' | 'bob';
+  /** Rad/s for rotate, rad/s phase for bob */
+  speed: number;
+  /** Meters for bob amplitude */
+  amplitude: number;
+};
+
 export interface Project {
   id: string;
   name: string;
@@ -65,6 +75,8 @@ export interface Project {
   logoOffsetY?: number;
   /** Persisted transforms keyed as `primary`, `logo`, or extra model `id` */
   studioTransforms?: Record<string, StudioNodeTransform>;
+  /** Optional motion rigs for hierarchy nodes (local + sync when API supports). */
+  studioRigs?: Record<string, StudioRigConfig>;
 }
 
 /** Strip stale blob: URLs from persisted projects (they 404 after the tab/session ends). */
@@ -117,6 +129,7 @@ const REMOTE_PROJECT_KEYS = new Set([
   'useCase',
   'category',
   'studioTransforms',
+  'studioRigs',
   'studioExtras',
   'logoScale',
   'logoOffsetY',
@@ -164,6 +177,7 @@ export function apiProjectToProject(p: ApiProject): Project {
     useCase: (p.useCase || '') as ProjectUseCase,
     category: p.category,
     studioTransforms: p.studioTransforms as Record<string, StudioNodeTransform> | undefined,
+    studioRigs: p.studioRigs as Record<string, StudioRigConfig> | undefined,
     studioExtras: p.studioExtras?.map((e) => ({
       id: e.id,
       name: e.name || 'Layer',

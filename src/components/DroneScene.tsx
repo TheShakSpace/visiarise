@@ -180,7 +180,7 @@ function SceneContent({
         penumbra={0.85}
         intensity={1.15}
         castShadow
-        shadow-mapSize={[1024, 1024]}
+        shadow-mapSize={[512, 512]}
       />
       <pointLight position={[-6, 4, -4]} intensity={0.45} color="#e4e4e7" />
       <pointLight position={[6, -2, 6]} intensity={0.28} color="#a1a1aa" />
@@ -202,9 +202,9 @@ function SceneContent({
 
       <ContactShadows
         position={[0, -1.35, 0]}
-        opacity={0.42}
-        scale={16}
-        blur={2.2}
+        opacity={0.38}
+        scale={14}
+        blur={1.6}
         far={6}
       />
       <Environment preset="city" />
@@ -242,7 +242,7 @@ export default function DroneScene({
     <div className={className} style={{ width: '100%', height: '100%', minHeight: 200 }}>
       <Canvas
         shadows
-        dpr={[1, 1.5]}
+        dpr={[1, 1.25]}
         gl={{
           alpha: false,
           antialias: true,

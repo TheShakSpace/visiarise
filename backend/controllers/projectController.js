@@ -60,6 +60,7 @@ const PATCHABLE = new Set([
   'useCase',
   'category',
   'studioTransforms',
+  'studioRigs',
   'studioExtras',
   'logoScale',
   'logoOffsetY',

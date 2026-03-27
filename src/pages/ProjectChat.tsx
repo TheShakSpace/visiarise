@@ -15,6 +15,7 @@ import {
   Share2,
   Edit3,
   User,
+  Users,
   Bot,
   Loader2,
   SlidersHorizontal,
@@ -24,61 +25,18 @@ import {
 import { ArdyaWordmark } from '../components/ArdyaWordmark';
 import { MeshyFormatDownloadLinks } from '../components/MeshyFormatDownloadLinks';
 import MeshyModelViewer from '../components/MeshyModelViewer';
+import PostModelFlow, { type PostFlowStep } from '../components/PostModelFlow';
+import { ProjectChatCreditsDialog } from '../components/projectchat/ProjectChatCreditsDialog';
+import { ProjectChatHireDialog } from '../components/projectchat/ProjectChatHireDialog';
 import {
   apiFetch,
   type ChatListResponse,
   type MeshyGenerateResponse,
   type MeshyTaskPayload,
-  type MeshyTaskStatusResponse,
 } from '../lib/api';
 import { isMongoObjectId } from '../lib/mongoId';
 import { compactModelUrls } from '../lib/meshyModel';
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function pollMeshyTask(
-  taskId: string,
-  token: string,
-  opts?: { onProgress?: (pct: number) => void; maxAttempts?: number }
-): Promise<MeshyTaskPayload> {
-  const maxAttempts = opts?.maxAttempts ?? 100;
-  for (let i = 0; i < maxAttempts; i++) {
-    const { task } = await apiFetch<MeshyTaskStatusResponse>(`/api/meshy/task/${encodeURIComponent(taskId)}`, {
-      token,
-    });
-    if (typeof task.progress === 'number') {
-      opts?.onProgress?.(Math.min(100, Math.max(0, task.progress)));
-    }
-    if (task.status === 'SUCCEEDED' || task.status === 'FAILED') {
-      if (task.status === 'FAILED') {
-        throw new Error(task.errorMessage || 'Meshy generation failed');
-      }
-      opts?.onProgress?.(100);
-      return task;
-    }
-    await sleep(2500);
-  }
-  throw new Error('Meshy task timed out — try again or check your Meshy dashboard.');
-}
-
-/** After preview succeeds, backend auto_refine sets linkedRefineTaskId on the preview document. */
-async function waitForLinkedRefineTask(previewTaskId: string, token: string, maxAttempts = 120): Promise<string> {
-  for (let i = 0; i < maxAttempts; i++) {
-    const { task } = await apiFetch<MeshyTaskStatusResponse>(`/api/meshy/task/${encodeURIComponent(previewTaskId)}`, {
-      token,
-    });
-    if (task.autoRefineError) {
-      throw new Error(task.autoRefineError);
-    }
-    if (task.linkedRefineTaskId) {
-      return task.linkedRefineTaskId;
-    }
-    await sleep(2500);
-  }
-  throw new Error('Timed out waiting for automatic texturing to start — check credits and try refine manually.');
-}
+import { pollMeshyTask, waitForLinkedRefineTask } from '../lib/meshyPoll';
 
 const CONCEPT_IMAGES = [
   '/Human_Avatar_Dhruv_Chaturvedi_img.png',
@@ -127,6 +85,7 @@ export default function ProjectChat() {
   const navigate = useNavigate();
   const {
     projects,
+    freelancers,
     chatHistory,
     addChatMessage,
     updateProject,
@@ -156,6 +115,9 @@ export default function ProjectChat() {
   });
   /** Meshy: geometry preview | preview+refine | refine-only (needs prior preview on this project). */
   const [meshyMeshMode, setMeshyMeshMode] = useState<'geometry' | 'full' | 'texture_only'>('full');
+  const [postFlowStep, setPostFlowStep] = useState<PostFlowStep | null>(null);
+  const [hireDialogOpen, setHireDialogOpen] = useState(false);
+  const [creditsDialogOpen, setCreditsDialogOpen] = useState(false);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
@@ -204,6 +166,25 @@ export default function ProjectChat() {
   }, [id, user?.token, replaceChatHistory]);
 
   if (!project) return <div className="p-10">Project not found.</div>;
+
+  const openPostModelFlow = (modelUrl: string) => {
+    if (!id) return;
+    const p = useAppStore.getState().projects.find((x) => x.id === id);
+    try {
+      sessionStorage.setItem(
+        `visiarise-listing-${id}`,
+        JSON.stringify({
+          name: p?.name || 'My model',
+          description: p?.description || '',
+          modelUrl,
+          thumb: p?.thumbnailUrl || '',
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+    setPostFlowStep('feedback');
+  };
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -341,6 +322,7 @@ export default function ProjectChat() {
           modelUrls: urls,
           status: 'draft',
         });
+        openPostModelFlow(finalGlb);
       } catch (err) {
         const msg = (err as Error).message || 'Meshy request failed';
         addChatMessage(id!, {
@@ -390,6 +372,7 @@ export default function ProjectChat() {
         thumbnailUrl: img,
         status: 'draft',
       });
+      openPostModelFlow(modelUrl);
     }, 3000);
   };
 
@@ -453,6 +436,7 @@ export default function ProjectChat() {
         modelUrls: urls,
         status: 'draft',
       });
+      openPostModelFlow(finalGlb);
       setStagedImage(null);
     } catch (err) {
       addChatMessage(id!, {
@@ -468,7 +452,11 @@ export default function ProjectChat() {
 
   const saveProjectName = () => {
     const t = projectName.trim();
-    if (t && t !== project.name) updateProject(id!, { name: t });
+    if (!t) {
+      setProjectName(project.name);
+      return;
+    }
+    if (t !== project.name) updateProject(id!, { name: t });
   };
 
   const setUseCase = (uc: ProjectUseCase) => {
@@ -486,6 +474,18 @@ export default function ProjectChat() {
 
   return (
     <div className="h-screen flex bg-[#030014] text-white overflow-hidden relative">
+      {postFlowStep ? (
+        <PostModelFlow
+          step={postFlowStep}
+          onStep={setPostFlowStep}
+          onClose={() => setPostFlowStep(null)}
+          projectId={id!}
+          onOpenMarketplaceList={() =>
+            navigate(`/marketplace?list=1&project=${encodeURIComponent(id || '')}`)
+          }
+          onLiked={() => {}}
+        />
+      ) : null}
       <AnimatePresence>
         {onboardingOpen && (
           <motion.div
@@ -563,8 +563,25 @@ export default function ProjectChat() {
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
             <span className="text-[10px] font-bold uppercase tracking-widest">Back to Dashboard</span>
           </Link>
-          <h2 className="text-sm font-bold tracking-tight mb-1">{project.name}</h2>
-          <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">ARdya · Project</p>
+          <div className="flex items-start gap-2 group/side-name">
+            <div className="min-w-0 flex-1">
+              <label className="text-[9px] font-bold text-white/35 uppercase tracking-widest block mb-1">
+                Project name
+              </label>
+              <input
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                onBlur={saveProjectName}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
+                placeholder="Name this project"
+                className="w-full bg-white/5 border border-white/15 rounded-lg px-2.5 py-2 text-sm font-semibold text-white placeholder:text-white/30 outline-none focus:border-brand-primary/50 focus:ring-1 focus:ring-brand-primary/30"
+              />
+            </div>
+            <Edit3 className="w-3.5 h-3.5 text-white/25 group-hover/side-name:text-brand-primary shrink-0 mt-6" aria-hidden />
+          </div>
+          <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold mt-3">ARdya · Project</p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -607,7 +624,15 @@ export default function ProjectChat() {
           </section>
         </div>
 
-        <div className="p-4 border-t border-white/5">
+        <div className="p-4 border-t border-white/5 space-y-2">
+          <button
+            type="button"
+            onClick={() => setHireDialogOpen(true)}
+            className="w-full py-3 rounded-xl border border-brand-primary/35 bg-brand-primary/10 text-brand-primary text-[10px] font-bold uppercase tracking-widest hover:bg-brand-primary/20 transition-all flex items-center justify-center gap-2"
+          >
+            <Users className="w-3.5 h-3.5" />
+            Hire a 3D designer
+          </button>
           <button
             type="button"
             onClick={() => navigate(`/studio/${id}`)}
@@ -625,25 +650,48 @@ export default function ProjectChat() {
             <Link to="/dashboard" className="p-2 hover:bg-white/5 rounded-full transition-colors lg:hidden">
               <ArrowLeft className="w-5 h-5 text-white/40" />
             </Link>
-            <div className="flex flex-col min-w-0">
+            <div className="flex flex-col min-w-0 gap-1.5">
               <div className="flex items-center gap-2">
                 <ArdyaWordmark />
                 <span className="text-[10px] text-white/35 uppercase tracking-widest hidden sm:inline">LLM</span>
               </div>
-              <input
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                onBlur={saveProjectName}
-                className="bg-transparent border-none outline-none text-sm font-semibold text-white/90 max-w-[200px] md:max-w-xs truncate"
-                title="Rename project"
-              />
+              <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.06] pl-3 pr-2 py-2 focus-within:border-brand-primary/45 focus-within:ring-1 focus-within:ring-brand-primary/20 max-w-[min(100vw-8rem,22rem)]">
+                <Edit3 className="w-4 h-4 text-brand-primary/80 shrink-0" aria-hidden />
+                <input
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  onBlur={saveProjectName}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
+                  placeholder="Tap to name your project"
+                  aria-label="Project name"
+                  className="min-w-0 flex-1 bg-transparent border-none outline-none text-sm font-semibold text-white placeholder:text-white/35"
+                />
+              </div>
+              <span className="text-[9px] text-white/30 hidden sm:block">Click the field, edit, then click outside or press Enter to save.</span>
             </div>
           </div>
 
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
+            <button
+              type="button"
+              onClick={() => setHireDialogOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-full border border-white/15 bg-white/5 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-white/85 hover:border-brand-primary/40 hover:text-brand-primary transition-colors shrink-0"
+            >
+              <Users className="w-3.5 h-3.5" />
+              Hire help
+            </button>
+            <button
+              type="button"
+              onClick={() => setCreditsDialogOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-full border border-white/15 bg-white/5 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-white/85 hover:border-brand-primary/40 transition-colors shrink-0"
+            >
+              Buy credits
+            </button>
             {selectedProvider === 'Meshy AI' ? (
               <div
-                className="flex flex-wrap rounded-full bg-white/5 border border-white/10 p-1 gap-0.5 max-w-[min(100%,280px)]"
+                className="flex flex-wrap rounded-full bg-white/5 border border-white/10 p-1 gap-0.5 max-w-[min(100%\\,280px)]"
                 title="Model = geometry preview. Textured = one generate call; backend runs refine when preview is ready. Texture = refine only (after a Model on this project)."
               >
                 <button
@@ -683,10 +731,14 @@ export default function ProjectChat() {
               </div>
             ) : null}
             {user?.token ? (
-              <span className="text-[9px] font-bold uppercase tracking-widest text-white/35 hidden sm:inline">
-                Credits{' '}
+              <button
+                type="button"
+                onClick={() => setCreditsDialogOpen(true)}
+                className="text-[9px] font-bold uppercase tracking-widest text-white/35 hover:text-white/60 sm:inline"
+              >
+                Balance{' '}
                 <span className="text-brand-primary/90">{user.isAdmin ? '∞' : user.credits ?? '—'}</span>
-              </span>
+              </button>
             ) : null}
             <div className="relative">
               <button
@@ -694,7 +746,7 @@ export default function ProjectChat() {
                 onClick={() => setIsProviderOpen(!isProviderOpen)}
                 className="flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 border border-white/10 hover:border-brand-primary/50 transition-all group"
               >
-                <div className="w-2 h-2 rounded-full bg-brand-primary shadow-[0_0_10px_rgba(119,67,219,0.5)]" />
+                <div className="w-2 h-2 rounded-full bg-brand-primary shadow-[0_0_10px_rgb(119_67_219_/_0.5)]" />
                 <span className="text-[10px] font-bold uppercase tracking-widest">{selectedProvider}</span>
                 <ChevronRight className={`w-3 h-3 text-white/20 transition-transform ${isProviderOpen ? 'rotate-90' : ''}`} />
               </button>
@@ -755,7 +807,16 @@ export default function ProjectChat() {
                     <span className="text-white/80">Model</span> (geometry),{' '}
                     <span className="text-white/80">Textured</span> (preview then auto texturing on the server), or{' '}
                     <span className="text-white/80">Texture</span> to refine an existing preview on this project. Other
-                    engines still use concept images from the gear menu (poly, image count).
+                    engines still use concept images from the gear menu (poly, image count). Rename your project in the
+                    header field above.                     Need human polish?{' '}
+                    <button
+                      type="button"
+                      onClick={() => setHireDialogOpen(true)}
+                      className="text-brand-primary font-semibold hover:underline"
+                    >
+                      Hire a 3D designer
+                    </button>
+                    .
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -851,6 +912,23 @@ export default function ProjectChat() {
                       </div>
                       <div className="px-6">
                         <MeshyFormatDownloadLinks urls={msg.modelUrls} compact />
+                      </div>
+                      <div className="px-6 pt-2 pb-1 flex flex-wrap gap-2 border-t border-white/5 mt-2">
+                        <button
+                          type="button"
+                          onClick={() => setHireDialogOpen(true)}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-primary/15 border border-brand-primary/35 text-[11px] font-bold text-brand-primary hover:bg-brand-primary/25 transition-colors"
+                        >
+                          <Users className="w-4 h-4" />
+                          Model not right? Hire a 3D designer
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPostFlowStep('feedback')}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/15 text-[11px] font-bold text-white/75 hover:bg-white/10 transition-colors"
+                        >
+                          Rate result &amp; options
+                        </button>
                       </div>
                     </div>
                   )}
@@ -968,7 +1046,7 @@ export default function ProjectChat() {
                     <SlidersHorizontal className="w-5 h-5" />
                   </button>
                   {settingsOpen && (
-                    <div className="absolute bottom-full right-0 mb-2 w-[min(100vw-2rem,280px)] rounded-2xl border border-white/10 bg-[#0c0c0c] p-4 shadow-2xl z-50 text-left">
+                    <div className="absolute bottom-full right-0 mb-2 w-[min(100vw-2rem\\,280px)] rounded-2xl border border-white/10 bg-[#0c0c0c] p-4 shadow-2xl z-50 text-left">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Output</span>
                         <button type="button" onClick={() => setSettingsOpen(false)} className="text-white/40">
@@ -1039,6 +1117,27 @@ export default function ProjectChat() {
           </div>
         </div>
       </main>
+
+      {id ? (
+        <ProjectChatHireDialog
+          open={hireDialogOpen}
+          onClose={() => setHireDialogOpen(false)}
+          projects={projects}
+          currentProjectId={id}
+          freelancers={freelancers}
+        />
+      ) : null}
+      <ProjectChatCreditsDialog
+        open={creditsDialogOpen}
+        onClose={() => setCreditsDialogOpen(false)}
+        balance={user?.isAdmin ? null : user?.credits ?? null}
+        isAdmin={!!user?.isAdmin}
+        onDemoAddCredits={(amount) => {
+          if (!user || user.isAdmin) return;
+          const cur = typeof user.credits === 'number' ? user.credits : 0;
+          setCredits(cur + amount);
+        }}
+      />
     </div>
   );
 }

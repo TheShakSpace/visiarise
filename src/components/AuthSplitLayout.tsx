@@ -38,10 +38,14 @@ export default function AuthSplitLayout({ children, eyebrow, title, subtitle }: 
           <source src={AUTH_HERO_VIDEO_SRC} type="video/mp4" />
         </video>
         <div
-          className="absolute inset-0 bg-gradient-to-br from-[#0a0018]/95 via-[#120428]/88 to-black/90"
+          className="absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(to bottom right, rgba(10, 0, 24, 0.95), rgba(18, 4, 40, 0.88), rgba(0, 0, 0, 0.9))',
+          }}
           aria-hidden
         />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_30%,rgba(139,92,246,0.25),transparent_50%)] pointer-events-none" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_30%\\,rgb(139_92_246_/_0.25)\\,transparent_50%)] pointer-events-none" />
         <div className="relative z-10 h-full min-h-screen flex flex-col justify-end p-12 xl:p-16 pb-16">
           <div className="mb-auto pt-8">
             <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-white/40 mb-4">VisiARise</p>
@@ -74,7 +78,10 @@ export default function AuthSplitLayout({ children, eyebrow, title, subtitle }: 
       </div>
 
       {/* Mobile: short quote strip */}
-      <div className="lg:hidden relative overflow-hidden border-b border-white/10 bg-gradient-to-r from-[#1a0a2e] via-[#0d0518] to-black px-4 py-6">
+      <div
+        className="lg:hidden relative overflow-hidden border-b border-white/10 px-4 py-6"
+        style={{ background: 'linear-gradient(to right, #1a0a2e, #0d0518, #000000)' }}
+      >
         <div className="absolute inset-0 opacity-40 bg-[url('data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%2240%22%20height=%2240%22%3E%3Cpath%20d=%22M0%2040h40V0%22%20fill=%22none%22%20stroke=%22%23fff%22%20stroke-opacity=%22.04%22/%3E%3C/svg%3E')]" />
         <p className="relative text-xs text-white/55 text-center font-light leading-relaxed max-w-md mx-auto">
           &ldquo;{q.text}&rdquo;
@@ -112,7 +119,7 @@ export default function AuthSplitLayout({ children, eyebrow, title, subtitle }: 
             <p className="text-sm text-white/45 leading-relaxed">{subtitle}</p>
           </div>
 
-          <div className="rounded-3xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset,0_24px_80px_-32px_rgba(139,92,246,0.35)] p-7 sm:p-8">
+          <div className="rounded-3xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-xl shadow-xl shadow-violet-500/20 ring-1 ring-inset ring-white/[0.04] p-7 sm:p-8">
             {children}
           </div>
         </motion.div>

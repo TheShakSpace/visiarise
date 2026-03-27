@@ -73,7 +73,7 @@ export default function AuthModal({ isOpen, onClose, type }: AuthModalProps) {
                 />
               </div>
 
-              <button className="w-full btn-neon-purple py-4 rounded-xl font-bold text-lg shadow-[0_0_20px_rgba(119,67,219,0.3)]">
+              <button className="w-full btn-neon-purple py-4 rounded-xl font-bold text-lg shadow-[0_0_20px_rgb(119_67_219_/_0.3)]">
                 {type === 'signin' ? 'Sign In' : 'Sign Up'}
               </button>
             </form>

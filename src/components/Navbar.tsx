@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Menu, ShoppingBag, X } from 'lucide-react';
+import { Menu, ShoppingBag, X, User } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 
 export default function Navbar() {
+  const user = useAppStore((s) => s.user);
   const cart = useAppStore((s) => s.cart);
   const cartCount = cart.reduce((n, i) => n + i.quantity, 0);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -65,6 +66,7 @@ export default function Navbar() {
     { type: 'route', name: 'Sustainability', path: '/sustainability' },
     { type: 'route', name: 'Learn', path: '/learn' },
     { type: 'route', name: 'Marketplace', path: '/marketplace' },
+    { type: 'route', name: 'Pricing', path: '/pricing' },
     { type: 'route', name: 'Freelancers', path: '/freelancers' },
   ];
 
@@ -106,7 +108,7 @@ export default function Navbar() {
                       transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
                     />
                   )}
-                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-0 h-[1px] bg-brand-primary transition-all duration-300 group-hover:w-1/2 shadow-[0_0_8px_rgba(255,255,255,0.25)]" />
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-0 h-[1px] bg-brand-primary transition-all duration-300 group-hover:w-1/2 shadow-[0_0_8px_rgb(255_255_255_/_0.25)]" />
                 </a>
               );
             }
@@ -131,13 +133,13 @@ export default function Navbar() {
                     transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
                   />
                 )}
-                <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-0 h-[1px] bg-brand-primary transition-all duration-300 group-hover:w-1/2 shadow-[0_0_8px_rgba(255,255,255,0.25)]" />
+                <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-0 h-[1px] bg-brand-primary transition-all duration-300 group-hover:w-1/2 shadow-[0_0_8px_rgb(255_255_255_/_0.25)]" />
               </Link>
             );
           })}
         </div>
 
-        <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           <Link
             to="/cart"
             className="relative p-2 rounded-full hover:bg-white/5 text-white/60 hover:text-white transition-colors"
@@ -150,6 +152,20 @@ export default function Navbar() {
               </span>
             )}
           </Link>
+          {user ? (
+            <Link
+              to="/dashboard"
+              className="hidden sm:flex items-center gap-2 pl-1 pr-3 py-1.5 rounded-full border border-white/15 bg-white/5 hover:bg-white/10 transition-colors"
+              title={user.name || 'Account'}
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-brand-primary to-violet-600 text-sm font-bold text-black ring-2 ring-white/20 shadow-md">
+                {(user.name?.charAt(0) || user.email?.charAt(0) || '?').toUpperCase()}
+              </span>
+              <span className="max-w-[100px] lg:max-w-[140px] truncate text-xs font-semibold text-white/90">
+                {user.name || 'Account'}
+              </span>
+            </Link>
+          ) : null}
           <button
             type="button"
             className="lg:hidden p-2 rounded-full text-white/85 hover:bg-white/10 transition-colors"
@@ -160,16 +176,18 @@ export default function Navbar() {
           >
             {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
-          <Link to="/login" className="hidden sm:inline-flex btn-neon-purple text-sm px-5 py-2.5 lg:px-6">
-            Get Started
-          </Link>
+          {!user ? (
+            <Link to="/login" className="hidden sm:inline-flex btn-neon-purple text-sm px-5 py-2.5 lg:px-6">
+              Get Started
+            </Link>
+          ) : null}
         </div>
       </div>
 
       {/* Mobile menu: starts below bar so backdrop covers rest of viewport */}
       <div
         id="mobile-nav"
-        className={`lg:hidden fixed left-0 right-0 bottom-0 z-[99] top-20 sm:top-24 transition-[visibility,opacity] duration-200 ${
+        className={`lg:hidden fixed left-0 right-0 bottom-0 z-[99] top-20 sm:top-24 transition-[visibility\\,opacity] duration-200 ${
           mobileOpen ? 'visible opacity-100' : 'invisible opacity-0 pointer-events-none'
         }`}
         aria-hidden={!mobileOpen}
@@ -180,7 +198,7 @@ export default function Navbar() {
           aria-label="Close menu"
           onClick={() => setMobileOpen(false)}
         />
-        <div className="relative mx-3 sm:mx-6 mt-2 rounded-2xl border border-white/10 bg-zinc-950/95 backdrop-blur-xl shadow-2xl overflow-hidden max-h-[min(85dvh,calc(100dvh-5rem))] overflow-y-auto">
+        <div className="relative mx-3 sm:mx-6 mt-2 rounded-2xl border border-white/10 bg-zinc-950/95 backdrop-blur-xl shadow-2xl overflow-hidden max-h-[calc(100dvh-5rem)] overflow-y-auto">
           <nav className="p-4 flex flex-col gap-1">
             {navLinks.map((link) => {
               if (link.type === 'hash') {
@@ -215,12 +233,22 @@ export default function Navbar() {
               );
             })}
             <div className="h-px bg-white/10 my-2" />
+            {user ? (
+              <Link
+                to="/dashboard"
+                className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 text-white font-medium"
+                onClick={() => setMobileOpen(false)}
+              >
+                <User className="w-5 h-5 text-brand-primary" />
+                {user.name || 'Workspace'}
+              </Link>
+            ) : null}
             <Link
-              to="/login"
+              to={user ? '/dashboard' : '/login'}
               className="btn-neon-purple text-sm py-3 justify-center mx-1 mb-1"
               onClick={() => setMobileOpen(false)}
             >
-              Get Started
+              {user ? 'Open workspace' : 'Get Started'}
             </Link>
           </nav>
         </div>

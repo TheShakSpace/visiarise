@@ -25,6 +25,7 @@ exports.toClientProject = (doc) => {
     useCase: o.useCase,
     category: o.category,
     studioTransforms: o.studioTransforms,
+    studioRigs: o.studioRigs,
     studioExtras: o.studioExtras,
     logoScale: o.logoScale,
     logoOffsetY: o.logoOffsetY,

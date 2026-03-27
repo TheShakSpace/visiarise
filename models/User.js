@@ -47,6 +47,12 @@ const userSchema = new mongoose.Schema(
       default: () => Number(process.env.DEFAULT_SIGNUP_CREDITS || 100),
       min: 0,
     },
+    /** Referral / promo code applied at signup (server-only; not exposed in public profile). */
+    referralCodeApplied: {
+      type: String,
+      select: false,
+      trim: true,
+    },
     createdAt: {
       type: Date,
       default: Date.now,

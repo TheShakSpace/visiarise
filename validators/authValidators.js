@@ -24,6 +24,9 @@ exports.validateSignup = [
     .withMessage('Password must be at least 6 characters long')
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
     .withMessage('Password must contain at least one uppercase letter, one lowercase letter, and one number'),
+
+  /** Validated in controller (required for full access unless ADMIN_EMAIL signup). */
+  body('referralCode').optional().trim().isLength({ max: 120 }).withMessage('Referral code is too long'),
 ];
 
 // Validation rules for login

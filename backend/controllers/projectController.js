@@ -1,7 +1,11 @@
+const fs = require('fs').promises;
 const mongoose = require('mongoose');
 const StudioProject = require('../models/StudioProject');
 const ProjectChatMessage = require('../models/ProjectChatMessage');
 const { toClientProject, toClientMessage } = require('../utils/projectMapper');
+const { arGlbFilePath, UPLOAD_DIR } = require('../utils/arGlbPaths');
+
+const GLB_MAGIC_LE = 0x46546c67; // "glTF" binary container
 
 function badId(res) {
   return res.status(400).json({ message: 'Invalid project id' });
@@ -64,6 +68,11 @@ const PATCHABLE = new Set([
   'studioExtras',
   'logoScale',
   'logoOffsetY',
+  'arSharePublic',
+  'arPageTitle',
+  'arPageTagline',
+  'arCtaLabel',
+  'arAccentHex',
 ]);
 
 exports.updateProject = async (req, res) => {
@@ -80,6 +89,30 @@ exports.updateProject = async (req, res) => {
     }
     if (updates.description && typeof updates.description === 'string') {
       updates.description = updates.description.slice(0, 2000);
+    }
+    if (updates.arSharePublic !== undefined) {
+      updates.arSharePublic = Boolean(updates.arSharePublic);
+    }
+    if (updates.arPageTitle !== undefined && typeof updates.arPageTitle === 'string') {
+      updates.arPageTitle = updates.arPageTitle.trim().slice(0, 120);
+    }
+    if (updates.arPageTagline !== undefined && typeof updates.arPageTagline === 'string') {
+      updates.arPageTagline = updates.arPageTagline.trim().slice(0, 280);
+    }
+    if (updates.arCtaLabel !== undefined && typeof updates.arCtaLabel === 'string') {
+      updates.arCtaLabel = updates.arCtaLabel.trim().slice(0, 80);
+    }
+    if (updates.arAccentHex !== undefined) {
+      if (typeof updates.arAccentHex !== 'string') {
+        return res.status(400).json({ message: 'arAccentHex must be a string' });
+      }
+      const h = updates.arAccentHex.trim();
+      if (h === '') updates.arAccentHex = '';
+      else if (!/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(h)) {
+        return res.status(400).json({ message: 'arAccentHex must be empty or #RGB / #RRGGBB' });
+      } else {
+        updates.arAccentHex = h;
+      }
     }
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ message: 'No valid fields to update' });
@@ -175,5 +208,124 @@ exports.appendChat = async (req, res) => {
   } catch (e) {
     console.error('appendChat', e);
     res.status(500).json({ message: 'Failed to save message' });
+  }
+};
+
+async function ensureArUploadDir() {
+  await fs.mkdir(UPLOAD_DIR, { recursive: true });
+}
+
+exports.uploadArGlb = async (req, res) => {
+  const started = Date.now();
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return badId(res);
+
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length < 20) {
+      return res.status(400).json({ message: 'GLB binary body required' });
+    }
+    if (buf.readUInt32LE(0) !== GLB_MAGIC_LE) {
+      return res.status(400).json({ message: 'Invalid GLB (expected glTF binary header)' });
+    }
+
+    await ensureArUploadDir();
+    const filePath = arGlbFilePath(id);
+    await fs.writeFile(filePath, buf);
+
+    const doc = await StudioProject.findOne({ _id: id, userId: req.user._id });
+    if (!doc) {
+      try {
+        await fs.unlink(filePath);
+      } catch (_) {
+        /* ignore */
+      }
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    doc.arGlbUploadedAt = new Date();
+    await doc.save();
+
+    console.info('[projects] ar-glb uploaded', {
+      projectId: id,
+      bytes: buf.length,
+      userId: String(req.user._id),
+      ms: Date.now() - started,
+    });
+
+    res.json({
+      ok: true,
+      modelPath: `/api/projects/share/${id}/model.glb`,
+    });
+  } catch (e) {
+    console.error('uploadArGlb', e);
+    res.status(500).json({ message: 'Failed to store AR bundle' });
+  }
+};
+
+exports.getPublicShare = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return badId(res);
+
+    const doc = await StudioProject.findById(id).lean();
+    if (!doc || !doc.arSharePublic) {
+      return res.status(404).json({ message: 'Not found' });
+    }
+
+    const filePath = arGlbFilePath(id);
+    try {
+      await fs.access(filePath);
+    } catch {
+      return res.status(404).json({ message: 'Published model not available' });
+    }
+
+    const title = (doc.arPageTitle && String(doc.arPageTitle).trim()) || doc.name;
+    const tagline = doc.arPageTagline ? String(doc.arPageTagline).trim() : '';
+    const cta = doc.arCtaLabel ? String(doc.arCtaLabel).trim() : '';
+
+    res.json({
+      projectId: id,
+      name: doc.name,
+      arPageTitle: title,
+      arPageTagline: tagline,
+      arCtaLabel: cta || 'View in your space',
+      arAccentHex: doc.arAccentHex ? String(doc.arAccentHex).trim() : '',
+      description: doc.description ? String(doc.description).slice(0, 2000) : '',
+      modelUrl: `/api/projects/share/${id}/model.glb`,
+    });
+  } catch (e) {
+    console.error('getPublicShare', e);
+    res.status(500).json({ message: 'Failed to load share' });
+  }
+};
+
+exports.streamShareModel = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return badId(res);
+
+    const doc = await StudioProject.findById(id).lean();
+    if (!doc || !doc.arSharePublic) {
+      return res.status(404).json({ message: 'Not found' });
+    }
+
+    const filePath = arGlbFilePath(id);
+    try {
+      await fs.access(filePath);
+    } catch {
+      return res.status(404).json({ message: 'Not found' });
+    }
+
+    res.setHeader('Content-Type', 'model/gltf-binary');
+    res.setHeader('Content-Disposition', 'inline; filename="experience.glb"');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    console.info('[projects] share model served', { projectId: id });
+    return res.sendFile(filePath);
+  } catch (e) {
+    console.error('streamShareModel', e);
+    res.status(500).json({ message: 'Failed to serve model' });
   }
 };

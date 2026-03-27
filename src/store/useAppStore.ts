@@ -77,6 +77,12 @@ export interface Project {
   studioTransforms?: Record<string, StudioNodeTransform>;
   /** Optional motion rigs for hierarchy nodes (local + sync when API supports). */
   studioRigs?: Record<string, StudioRigConfig>;
+  /** When true, hosted GLB is readable without auth (public link / QR). */
+  arSharePublic?: boolean;
+  arPageTitle?: string;
+  arPageTagline?: string;
+  arCtaLabel?: string;
+  arAccentHex?: string;
 }
 
 /** Strip stale blob: URLs from persisted projects (they 404 after the tab/session ends). */
@@ -133,6 +139,11 @@ const REMOTE_PROJECT_KEYS = new Set([
   'studioExtras',
   'logoScale',
   'logoOffsetY',
+  'arSharePublic',
+  'arPageTitle',
+  'arPageTagline',
+  'arCtaLabel',
+  'arAccentHex',
 ]);
 
 function projectToRemotePatch(merged: Project): Record<string, unknown> {
@@ -185,6 +196,11 @@ export function apiProjectToProject(p: ApiProject): Project {
     })),
     logoScale: p.logoScale,
     logoOffsetY: p.logoOffsetY,
+    arSharePublic: p.arSharePublic,
+    arPageTitle: p.arPageTitle,
+    arPageTagline: p.arPageTagline,
+    arCtaLabel: p.arCtaLabel,
+    arAccentHex: p.arAccentHex,
   };
 }
 

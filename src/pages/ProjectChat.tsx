@@ -37,6 +37,9 @@ import {
 import { isMongoObjectId } from '../lib/mongoId';
 import { compactModelUrls } from '../lib/meshyModel';
 import { pollMeshyTask, waitForLinkedRefineTask } from '../lib/meshyPoll';
+import { fetchGlbArrayBufferForPublish, glbArrayBufferToDataUrl } from '../lib/fetchGlbForPublish';
+import { submitWebArPublish } from '../lib/submitWebArPublish';
+import { StudioPublishDialog, type StudioPublishOptions } from '../components/studio/StudioPublishDialog';
 
 const CONCEPT_IMAGES = [
   '/Human_Avatar_Dhruv_Chaturvedi_img.png',
@@ -118,6 +121,12 @@ export default function ProjectChat() {
   const [postFlowStep, setPostFlowStep] = useState<PostFlowStep | null>(null);
   const [hireDialogOpen, setHireDialogOpen] = useState(false);
   const [creditsDialogOpen, setCreditsDialogOpen] = useState(false);
+  const [arPublishOpen, setArPublishOpen] = useState(false);
+  const [arPublishBusy, setArPublishBusy] = useState(false);
+  const [arPublishSource, setArPublishSource] = useState<{
+    modelUrl: string;
+    modelUrls?: ChatMessage['modelUrls'];
+  } | null>(null);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
@@ -184,6 +193,57 @@ export default function ProjectChat() {
       /* ignore */
     }
     setPostFlowStep('feedback');
+  };
+
+  const openArPublishFromLlm = (msg: ChatMessage) => {
+    if (!msg.modelUrl || !id) return;
+    if (!user?.token) {
+      addChatMessage(id, {
+        id: `sys-${Date.now()}`,
+        role: 'assistant',
+        content: 'Sign in with a verified account to publish WebAR.',
+      });
+      return;
+    }
+    setArPublishSource({ modelUrl: msg.modelUrl, modelUrls: msg.modelUrls });
+    setArPublishOpen(true);
+  };
+
+  const confirmArPublishFromChat = async (opts: StudioPublishOptions) => {
+    if (!id || !user?.token || !arPublishSource) return;
+    setArPublishBusy(true);
+    try {
+      const buffer = await fetchGlbArrayBufferForPublish({
+        modelUrl: arPublishSource.modelUrl,
+        modelUrls: arPublishSource.modelUrls ?? undefined,
+        modelDataUrl: project.modelDataUrl,
+        token: user.token,
+      });
+      await submitWebArPublish(id, buffer, opts, user.token);
+      const dataUrl = glbArrayBufferToDataUrl(buffer);
+      updateProject(id, {
+        modelDataUrl: dataUrl,
+        modelUrl: undefined,
+        status: 'published',
+        arSharePublic: opts.arSharePublic,
+        arPageTitle: opts.arPageTitle,
+        arPageTagline: opts.arPageTagline,
+        arCtaLabel: opts.arCtaLabel,
+        arAccentHex: opts.arAccentHex,
+      });
+      setArPublishOpen(false);
+      setArPublishSource(null);
+      navigate(`/ar/${id}`);
+    } catch (err) {
+      console.error(err);
+      addChatMessage(id, {
+        id: `err-${Date.now()}`,
+        role: 'assistant',
+        content: `Could not publish WebAR: ${(err as Error).message}. Try again or use AR Studio to export.`,
+      });
+    } finally {
+      setArPublishBusy(false);
+    }
   };
 
   const handleSend = async (e?: React.FormEvent) => {
@@ -891,19 +951,19 @@ export default function ProjectChat() {
                     <div className="rounded-[2.5rem] border border-white/10 bg-white/5 overflow-hidden shadow-2xl space-y-4 pb-4">
                       <div className="aspect-square relative group min-h-[280px]">
                         <MeshyModelViewer src={msg.modelUrl} token={user?.token} />
-                        <div className="absolute bottom-6 left-6 right-6 flex gap-3 opacity-0 group-hover:opacity-100 transition-all translate-y-4 group-hover:translate-y-0">
+                        <div className="absolute bottom-6 left-6 right-6 flex flex-wrap gap-3 opacity-0 group-hover:opacity-100 transition-all translate-y-4 group-hover:translate-y-0">
                           <button
                             type="button"
                             onClick={() => navigate(`/studio/${id}`)}
-                            className="flex-1 py-3 rounded-2xl bg-white text-black text-[10px] font-bold uppercase tracking-widest hover:bg-white/90 transition-all flex items-center justify-center gap-2 shadow-xl"
+                            className="flex-1 min-w-[40%] py-3 rounded-2xl bg-white text-black text-[10px] font-bold uppercase tracking-widest hover:bg-white/90 transition-all flex items-center justify-center gap-2 shadow-xl"
                           >
                             <Edit3 className="w-4 h-4" />
                             AR Studio
                           </button>
                           <button
                             type="button"
-                            onClick={() => navigate(`/ar/${id}`)}
-                            className="flex-1 py-3 rounded-2xl bg-brand-primary text-black text-[10px] font-bold uppercase tracking-widest hover:bg-brand-primary/90 transition-all flex items-center justify-center gap-2 shadow-xl"
+                            onClick={() => openArPublishFromLlm(msg)}
+                            className="flex-1 min-w-[40%] py-3 rounded-2xl bg-brand-primary text-black text-[10px] font-bold uppercase tracking-widest hover:bg-brand-primary/90 transition-all flex items-center justify-center gap-2 shadow-xl"
                           >
                             <Box className="w-4 h-4" />
                             Publish AR
@@ -1137,6 +1197,21 @@ export default function ProjectChat() {
           const cur = typeof user.credits === 'number' ? user.credits : 0;
           setCredits(cur + amount);
         }}
+      />
+
+      <StudioPublishDialog
+        open={arPublishOpen}
+        busy={arPublishBusy}
+        projectName={projectName.trim() || project.name}
+        defaults={{
+          arPageTitle: project.arPageTitle || project.name,
+          arPageTagline: project.arPageTagline || project.description?.slice(0, 280) || '',
+          arCtaLabel: project.arCtaLabel || 'View in your space',
+          arAccentHex: project.arAccentHex || '#10b981',
+          arSharePublic: project.arSharePublic !== false,
+        }}
+        onClose={() => !arPublishBusy && setArPublishOpen(false)}
+        onConfirm={confirmArPublishFromChat}
       />
     </div>
   );

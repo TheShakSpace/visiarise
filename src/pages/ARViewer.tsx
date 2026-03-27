@@ -14,7 +14,7 @@ import {
   Info,
   Loader2,
 } from 'lucide-react';
-import { apiUrl } from '../lib/api';
+import { apiFetch, apiUrl, type PublicShareResponse } from '../lib/api';
 
 const ModelViewer = 'model-viewer' as any;
 
@@ -29,12 +29,45 @@ export default function ARViewer() {
   const [meshyBlobUrl, setMeshyBlobUrl] = useState<string | null>(null);
   const [meshyLoadError, setMeshyLoadError] = useState<string | null>(null);
   const [meshyLoading, setMeshyLoading] = useState(false);
+  const [shareMeta, setShareMeta] = useState<PublicShareResponse | null>(null);
+  const [shareState, setShareState] = useState<'idle' | 'loading' | 'absent' | 'error'>('idle');
 
   const isPublicPreview = location.pathname === '/try-ar';
   const project = id ? projects.find((p) => p.id === id) : undefined;
 
   const modelFromQuery = searchParams.get('model');
   const nameFromQuery = searchParams.get('name');
+
+  useEffect(() => {
+    if (!id || isPublicPreview || project) {
+      setShareMeta(null);
+      setShareState('idle');
+      return;
+    }
+    let cancelled = false;
+    setShareState('loading');
+    (async () => {
+      try {
+        const data = await apiFetch<PublicShareResponse>(`/api/projects/share/${id}`);
+        if (!cancelled) {
+          setShareMeta(data);
+          setShareState('idle');
+        }
+      } catch (e: unknown) {
+        const status =
+          typeof e === 'object' && e !== null && 'status' in e
+            ? (e as { status?: number }).status
+            : undefined;
+        if (!cancelled) {
+          setShareMeta(null);
+          setShareState(status === 404 ? 'absent' : 'error');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isPublicPreview, project]);
 
   const rawModelUrl = useMemo(() => {
     if (isPublicPreview) {
@@ -46,8 +79,20 @@ export default function ARViewer() {
       }
       return modelFromQuery || stored || DEFAULT_LOCAL_MODEL;
     }
-    return project?.modelDataUrl || project?.modelUrl || DEFAULT_LOCAL_MODEL;
-  }, [isPublicPreview, modelFromQuery, project?.modelDataUrl, project?.modelUrl]);
+    if (project?.modelDataUrl || project?.modelUrl) {
+      return project.modelDataUrl || project.modelUrl || DEFAULT_LOCAL_MODEL;
+    }
+    if (shareMeta?.modelUrl) {
+      return apiUrl(shareMeta.modelUrl);
+    }
+    return DEFAULT_LOCAL_MODEL;
+  }, [
+    isPublicPreview,
+    modelFromQuery,
+    project?.modelDataUrl,
+    project?.modelUrl,
+    shareMeta?.modelUrl,
+  ]);
 
   /** Local / data URLs work immediately; Meshy CDN needs proxy + blob. */
   const directModelUrl = useMemo(() => {
@@ -112,7 +157,23 @@ export default function ARViewer() {
 
   const title = isPublicPreview
     ? nameFromQuery || 'AR preview'
-    : project?.name || 'AR';
+    : project
+      ? project.arPageTitle || project.name
+      : shareMeta?.arPageTitle || shareMeta?.name || 'AR';
+
+  const tagline =
+    (!isPublicPreview &&
+      (shareMeta?.arPageTagline ||
+        project?.arPageTagline ||
+        (shareMeta?.description ? shareMeta.description.slice(0, 160) : '') ||
+        (project?.description ? project.description.slice(0, 160) : ''))) ||
+    '';
+
+  const ctaLabel =
+    (!isPublicPreview && (shareMeta?.arCtaLabel || project?.arCtaLabel)) || 'View in your space';
+
+  const accent =
+    (!isPublicPreview && (shareMeta?.arAccentHex || project?.arAccentHex)) || '#10b981';
 
   const shareUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
@@ -131,8 +192,45 @@ export default function ARViewer() {
     return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${data}`;
   }, [shareUrl]);
 
-  if (!isPublicPreview && id && !project) {
-    return <div className="p-10 text-white bg-black min-h-screen">Project not found.</div>;
+  if (!isPublicPreview && id && !project && shareState === 'loading') {
+    return (
+      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-4 text-white">
+        <Loader2 className="w-10 h-10 animate-spin text-emerald-500" />
+        <p className="text-sm text-white/50">Loading AR experience…</p>
+      </div>
+    );
+  }
+
+  if (!isPublicPreview && id && !project && shareState === 'absent') {
+    return (
+      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-4 px-6 text-center text-white">
+        <p className="text-lg font-bold tracking-tight">This experience is not available</p>
+        <p className="text-sm text-white/55 max-w-md leading-relaxed">
+          It may be private, not published yet, or the link is wrong. Ask the creator to publish with a{' '}
+          <strong className="text-white/80">public</strong> link from AR Studio.
+        </p>
+        <Link
+          to="/"
+          className="mt-2 px-5 py-2.5 rounded-full text-sm font-bold bg-white text-black hover:bg-white/90"
+        >
+          Back home
+        </Link>
+      </div>
+    );
+  }
+
+  if (!isPublicPreview && id && !project && shareState === 'error') {
+    return (
+      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-4 px-6 text-center text-white">
+        <p className="text-sm text-white/60">Could not load this AR page. Check your connection and try again.</p>
+        <Link
+          to="/"
+          className="px-5 py-2.5 rounded-full text-sm font-bold bg-white text-black hover:bg-white/90"
+        >
+          Back home
+        </Link>
+      </div>
+    );
   }
 
   return (
@@ -147,8 +245,20 @@ export default function ARViewer() {
           </Link>
           <div className="min-w-0">
             <h1 className="text-sm font-bold tracking-tight truncate">{title}</h1>
-            <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">
-              {isPublicPreview ? 'Local GLB · WebAR' : 'AR Experience Preview'}
+            <p
+              className={
+                isPublicPreview || !tagline
+                  ? 'text-[10px] text-white/40 uppercase tracking-widest font-bold'
+                  : 'text-[11px] text-white/50 leading-snug line-clamp-2 font-medium normal-case tracking-normal'
+              }
+            >
+              {isPublicPreview
+                ? 'Local GLB · WebAR'
+                : tagline
+                  ? tagline.length > 180
+                    ? `${tagline.slice(0, 180)}…`
+                    : tagline
+                  : 'AR Experience Preview'}
             </p>
           </div>
         </div>
@@ -161,6 +271,7 @@ export default function ARViewer() {
               }
             }}
             className="flex-1 sm:flex-initial px-3 sm:px-4 py-2 rounded-full bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+            style={{ borderColor: accent && accent !== '#10b981' ? `${accent}55` : undefined }}
           >
             <Share2 className="w-3 h-3 shrink-0" />
             <span className="truncate">Copy link</span>
@@ -168,9 +279,10 @@ export default function ARViewer() {
           <a
             href={modelUrlForViewer || rawModelUrl}
             download
-            className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2 rounded-full bg-emerald-500 text-black text-xs font-bold hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 ${
-              !modelUrlForViewer ? 'pointer-events-none opacity-40' : ''
+            className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2 rounded-full text-black text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+              !modelUrlForViewer ? 'pointer-events-none opacity-40' : 'hover:opacity-90'
             }`}
+            style={{ backgroundColor: accent }}
           >
             <Download className="w-3 h-3 shrink-0" />
             GLB
@@ -205,10 +317,17 @@ export default function ARViewer() {
             >
               <button
                 slot="ar-button"
-                className="absolute bottom-6 sm:bottom-10 left-1/2 -translate-x-1/2 max-w-[calc(100%-2rem)] px-5 sm:px-8 py-3 sm:py-4 bg-emerald-500 text-black text-sm sm:text-base font-bold rounded-full hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-2xl shadow-emerald-500/40"
+                className="absolute bottom-6 sm:bottom-10 left-1/2 -translate-x-1/2 max-w-[calc(100%-2rem)] px-5 sm:px-8 py-3 sm:py-4 text-black text-sm sm:text-base font-bold rounded-full transition-all flex items-center justify-center gap-2 shadow-2xl"
+                style={{
+                  backgroundColor: accent,
+                  boxShadow:
+                    accent && accent !== '#10b981'
+                      ? `0 25px 50px -12px ${accent}66`
+                      : '0 25px 50px -12px rgba(16, 185, 129, 0.4)',
+                }}
               >
                 <Smartphone className="w-5 h-5" />
-                View in your space
+                {ctaLabel}
               </button>
             </ModelViewer>
           ) : !meshyLoading && !meshyLoadError && !modelUrlForViewer ? (
@@ -219,7 +338,7 @@ export default function ARViewer() {
 
           <div className="absolute top-4 left-4 sm:top-8 sm:left-8 space-y-2 sm:space-y-4 pointer-events-none">
             <div className="px-4 py-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center gap-3 w-fit">
-              <Globe className="w-4 h-4 text-emerald-500" />
+              <Globe className="w-4 h-4" style={{ color: accent }} />
               <span className="text-[10px] font-bold uppercase tracking-widest text-white/60">
                 WebAR
               </span>
@@ -237,7 +356,7 @@ export default function ARViewer() {
           <div className="space-y-6">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center">
-                <QrCode className="w-6 h-6 text-emerald-500" />
+                <QrCode className="w-6 h-6" style={{ color: accent }} />
               </div>
               <h2 className="text-xl font-bold tracking-tight">Scan to open</h2>
             </div>
@@ -274,8 +393,11 @@ export default function ARViewer() {
             </div>
           </div>
 
-          <div className="mt-auto p-6 rounded-3xl bg-emerald-500/5 border border-emerald-500/10 space-y-4">
-            <div className="flex items-center gap-2 text-emerald-500">
+          <div
+            className="mt-auto p-6 rounded-3xl space-y-4 border border-white/10"
+            style={{ backgroundColor: `${accent}12` }}
+          >
+            <div className="flex items-center gap-2" style={{ color: accent }}>
               <Info className="w-4 h-4" />
               <span className="text-xs font-bold uppercase tracking-widest">Tip</span>
             </div>

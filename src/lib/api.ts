@@ -151,6 +151,24 @@ export type ApiProject = {
   studioExtras?: ApiStudioExtra[];
   logoScale?: number;
   logoOffsetY?: number;
+  arSharePublic?: boolean;
+  arPageTitle?: string;
+  arPageTagline?: string;
+  arCtaLabel?: string;
+  arAccentHex?: string;
+  arGlbUploadedAt?: string;
+};
+
+/** Public WebAR metadata (no auth). `modelUrl` is an API path; use {@link apiUrl}. */
+export type PublicShareResponse = {
+  projectId: string;
+  name: string;
+  arPageTitle: string;
+  arPageTagline: string;
+  arCtaLabel: string;
+  arAccentHex: string;
+  description: string;
+  modelUrl: string;
 };
 
 export type ProjectsListResponse = { projects: ApiProject[] };

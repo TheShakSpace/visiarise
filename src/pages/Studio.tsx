@@ -6,13 +6,16 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { useAppStore, type StudioExtraModel, type StudioRigConfig } from '../store/useAppStore';
 import {
   applyStudioTransform,
+  arrayBufferToGlbDataUrl,
   centerObjectAtOrigin,
+  exportObject3DToGlbArrayBuffer,
   exportObject3DToGlbDataUrl,
   fitCameraToObject,
   loadGltfMeshyWithAnimations,
   loadGltfWithAnimations,
   readStudioTransform,
 } from '../lib/studio3d';
+import { submitWebArPublish } from '../lib/submitWebArPublish';
 import {
   countTriangles,
   estimateTextureBytes,
@@ -63,6 +66,7 @@ import { StudioAiChat } from '../components/studio/StudioAiChat';
 import { StudioDownloadDialog } from '../components/studio/StudioDownloadDialog';
 import { StudioGuideDialog } from '../components/studio/StudioGuideDialog';
 import { StudioMotionRigDialog } from '../components/studio/StudioMotionRigDialog';
+import { StudioPublishDialog, type StudioPublishOptions } from '../components/studio/StudioPublishDialog';
 
 const PRIMARY_ID = 'primary';
 const LOGO_ID = 'logo';
@@ -119,6 +123,7 @@ export default function Studio() {
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
 
   const [activeTool, setActiveTool] = useState<'translate' | 'rotate' | 'scale'>('translate');
@@ -791,22 +796,44 @@ export default function Studio() {
     showStatus('Motion rig saved');
   };
 
-  const handlePublishAr = async () => {
+  const openPublishDialog = () => {
     if (!id || !contentRootRef.current) return;
     const root = contentRootRef.current;
     if (root.children.length === 0) {
       showStatus('Add a model before publishing');
       return;
     }
+    if (!user?.token) {
+      showStatus('Sign in to publish a shareable link');
+      return;
+    }
+    setPublishDialogOpen(true);
+  };
+
+  const confirmPublishAr = async (opts: StudioPublishOptions) => {
+    if (!id || !contentRootRef.current || !user?.token) return;
+    const root = contentRootRef.current;
     setIsPublishing(true);
     try {
-      const dataUrl = await exportObject3DToGlbDataUrl(root);
-      updateProject(id, { modelDataUrl: dataUrl, modelUrl: undefined });
-      showStatus('Scene exported · opening AR');
+      const buffer = await exportObject3DToGlbArrayBuffer(root);
+      await submitWebArPublish(id, buffer, opts, user.token);
+      const dataUrl = arrayBufferToGlbDataUrl(buffer);
+      updateProject(id, {
+        modelDataUrl: dataUrl,
+        modelUrl: undefined,
+        status: 'published',
+        arSharePublic: opts.arSharePublic,
+        arPageTitle: opts.arPageTitle,
+        arPageTagline: opts.arPageTagline,
+        arCtaLabel: opts.arCtaLabel,
+        arAccentHex: opts.arAccentHex,
+      });
+      setPublishDialogOpen(false);
+      showStatus(opts.arSharePublic ? 'Live — share link & QR work for everyone' : 'Saved privately on your account');
       navigate(`/ar/${id}`);
     } catch (e) {
       console.error(e);
-      showStatus('Export failed — try simplifying the scene');
+      showStatus('Publish failed — check connection, sign in, or try a smaller scene');
     } finally {
       setIsPublishing(false);
     }
@@ -814,6 +841,10 @@ export default function Studio() {
 
   const copyShareLink = async () => {
     if (!id) return;
+    if (project && project.arSharePublic === false) {
+      showStatus('Republish with “Public” so anyone can open this link');
+      return;
+    }
     const url = `${window.location.origin}/ar/${id}`;
     try {
       await navigator.clipboard.writeText(url);
@@ -1361,7 +1392,7 @@ export default function Studio() {
           </button>
           <button
             type="button"
-            onClick={handlePublishAr}
+            onClick={openPublishDialog}
             disabled={isPublishing}
             className="px-4 sm:px-6 py-2 bg-white text-black rounded-full text-[10px] sm:text-xs font-bold hover:bg-white/90 transition-all flex items-center gap-2 disabled:opacity-50"
           >
@@ -2169,7 +2200,8 @@ export default function Studio() {
               </summary>
               <div className={`mt-3 space-y-3 text-[11px] ${uiTheme === 'light' ? 'text-zinc-800' : 'text-white/80'}`}>
                 <p className={themeMuted}>
-                  Publish AR merges the scene to GLB (WebAR) and opens the viewer. Scan below on mobile.
+                  After you publish, your QR points to your site. Choose <strong>Public</strong> in the publish dialog
+                  so anyone can open the link — the GLB is hosted on your server.
                 </p>
                 {qrDataUrl ? (
                   <div className="flex flex-col items-center gap-2">
@@ -2380,6 +2412,23 @@ export default function Studio() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {project ? (
+        <StudioPublishDialog
+          open={publishDialogOpen}
+          busy={isPublishing}
+          projectName={projectTitle.trim() || project.name}
+          defaults={{
+            arPageTitle: project.arPageTitle || project.name,
+            arPageTagline: project.arPageTagline || project.description?.slice(0, 280) || '',
+            arCtaLabel: project.arCtaLabel || 'View in your space',
+            arAccentHex: project.arAccentHex || '#10b981',
+            arSharePublic: project.arSharePublic !== false,
+          }}
+          onClose={() => !isPublishing && setPublishDialogOpen(false)}
+          onConfirm={confirmPublishAr}
+        />
       ) : null}
     </div>
   );

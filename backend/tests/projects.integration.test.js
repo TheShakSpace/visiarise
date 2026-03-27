@@ -101,6 +101,69 @@ describe('Projects & chat API', () => {
     expect(chat.body.messages[1].modelUrls.glb).toContain('example.com');
   });
 
+  it('hosts public AR share when arSharePublic and GLB uploaded', async () => {
+    const minimalGlbBuffer = () => {
+      const gltfJson = JSON.stringify({
+        asset: { version: '2.0' },
+        scenes: [{ nodes: [] }],
+        scene: 0,
+        nodes: [],
+      });
+      const jsonStr = gltfJson + ' '.repeat((4 - (Buffer.byteLength(gltfJson) % 4)) % 4);
+      const jsonBuf = Buffer.from(jsonStr, 'utf8');
+      const totalLen = 12 + 8 + jsonBuf.length;
+      const out = Buffer.alloc(totalLen);
+      out.writeUInt32LE(0x46546c67, 0);
+      out.writeUInt32LE(2, 4);
+      out.writeUInt32LE(totalLen, 8);
+      let o = 12;
+      out.writeUInt32LE(jsonBuf.length, o);
+      o += 4;
+      out.writeUInt32LE(0x4e4f534a, o);
+      o += 4;
+      jsonBuf.copy(out, o);
+      return out;
+    };
+
+    const create = await request(app)
+      .post('/api/projects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'AR Pub' })
+      .expect(201);
+    const pid = create.body.project.id;
+
+    await request(app).get(`/api/projects/share/${pid}`).expect(404);
+
+    const glb = minimalGlbBuffer();
+    await request(app)
+      .post(`/api/projects/${pid}/ar-glb`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('Content-Type', 'application/octet-stream')
+      .send(glb)
+      .expect(200);
+
+    await request(app).get(`/api/projects/share/${pid}`).expect(404);
+
+    await request(app)
+      .patch(`/api/projects/${pid}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        arSharePublic: true,
+        arPageTitle: 'My Demo',
+        arPageTagline: 'Try it',
+        status: 'published',
+      })
+      .expect(200);
+
+    const share = await request(app).get(`/api/projects/share/${pid}`).expect(200);
+    expect(share.body.arPageTitle).toBe('My Demo');
+    expect(share.body.modelUrl).toContain('model.glb');
+
+    const model = await request(app).get(`/api/projects/share/${pid}/model.glb`).expect(200);
+    expect(model.headers['content-type']).toMatch(/model\/gltf-binary/);
+    expect(Number(model.headers['content-length'])).toBeGreaterThanOrEqual(92);
+  });
+
   it('returns 401 without token', async () => {
     await request(app).get('/api/projects').expect(401);
   });

@@ -29,6 +29,12 @@ exports.toClientProject = (doc) => {
     studioExtras: o.studioExtras,
     logoScale: o.logoScale,
     logoOffsetY: o.logoOffsetY,
+    arSharePublic: o.arSharePublic,
+    arPageTitle: o.arPageTitle,
+    arPageTagline: o.arPageTagline,
+    arCtaLabel: o.arCtaLabel,
+    arAccentHex: o.arAccentHex,
+    arGlbUploadedAt: o.arGlbUploadedAt ? new Date(o.arGlbUploadedAt).toISOString() : undefined,
   });
 };
 

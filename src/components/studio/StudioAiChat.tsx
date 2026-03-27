@@ -9,8 +9,11 @@ import { apiFetch, type ChatListResponse, type MeshyGenerateResponse } from '../
 import { isMongoObjectId } from '../../lib/mongoId';
 import { compactModelUrls } from '../../lib/meshyModel';
 import { pollMeshyTask, waitForLinkedRefineTask } from '../../lib/meshyPoll';
+import { fetchGlbArrayBufferForPublish, glbArrayBufferToDataUrl } from '../../lib/fetchGlbForPublish';
+import { submitWebArPublish } from '../../lib/submitWebArPublish';
+import { StudioPublishDialog, type StudioPublishOptions } from './StudioPublishDialog';
 import { Send, Loader2, ImagePlus, Box, Sparkles, Users, ExternalLink } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 type Props = {
   projectId: string;
@@ -22,6 +25,7 @@ type Props = {
 };
 
 export function StudioAiChat({ projectId, compact, themeMuted, themeInk, uiTheme, onModelReady }: Props) {
+  const navigate = useNavigate();
   const {
     projects,
     user,
@@ -41,6 +45,9 @@ export function StudioAiChat({ projectId, compact, themeMuted, themeInk, uiTheme
   const [stagedImage, setStagedImage] = useState<string | null>(null);
   const [meshyMeshMode, setMeshyMeshMode] = useState<'geometry' | 'full' | 'texture_only'>('full');
   const [poly, setPoly] = useState<'low' | 'medium' | 'high'>('medium');
+  const [arPubOpen, setArPubOpen] = useState(false);
+  const [arPubBusy, setArPubBusy] = useState(false);
+  const [arPubMsg, setArPubMsg] = useState<ChatMessage | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLInputElement>(null);
 
@@ -245,6 +252,57 @@ export function StudioAiChat({ projectId, compact, themeMuted, themeInk, uiTheme
     onModelReady?.();
   };
 
+  const openStudioArPublish = (m: ChatMessage) => {
+    if (!m.modelUrl) return;
+    if (!user?.token) {
+      addChatMessage(projectId, {
+        id: `pub-${Date.now()}`,
+        role: 'assistant',
+        content: 'Sign in to publish WebAR from the chat.',
+      });
+      return;
+    }
+    setArPubMsg(m);
+    setArPubOpen(true);
+  };
+
+  const confirmStudioArPublish = async (opts: StudioPublishOptions) => {
+    if (!arPubMsg?.modelUrl || !user?.token || !project) return;
+    setArPubBusy(true);
+    try {
+      const buffer = await fetchGlbArrayBufferForPublish({
+        modelUrl: arPubMsg.modelUrl,
+        modelUrls: arPubMsg.modelUrls,
+        modelDataUrl: project.modelDataUrl,
+        token: user.token,
+      });
+      await submitWebArPublish(projectId, buffer, opts, user.token);
+      const dataUrl = glbArrayBufferToDataUrl(buffer);
+      updateProject(projectId, {
+        modelDataUrl: dataUrl,
+        modelUrl: undefined,
+        status: 'published',
+        arSharePublic: opts.arSharePublic,
+        arPageTitle: opts.arPageTitle,
+        arPageTagline: opts.arPageTagline,
+        arCtaLabel: opts.arCtaLabel,
+        arAccentHex: opts.arAccentHex,
+      });
+      setArPubOpen(false);
+      setArPubMsg(null);
+      navigate(`/ar/${projectId}`);
+      onModelReady?.();
+    } catch (err) {
+      addChatMessage(projectId, {
+        id: `pub-err-${Date.now()}`,
+        role: 'assistant',
+        content: `Publish failed: ${(err as Error).message}`,
+      });
+    } finally {
+      setArPubBusy(false);
+    }
+  };
+
   const border = uiTheme === 'light' ? 'border-zinc-200' : 'border-white/10';
   const bubbleUser = uiTheme === 'light' ? 'bg-zinc-200 text-zinc-900' : 'bg-white/10 text-white/90';
   const bubbleAi = uiTheme === 'light' ? 'bg-white border border-zinc-200 text-zinc-800' : 'bg-white/5 text-white/85';
@@ -317,6 +375,13 @@ export function StudioAiChat({ projectId, compact, themeMuted, themeInk, uiTheme
                   onClick={() => fuseAsLayer(m.modelUrl!)}
                 >
                   Fuse as layer
+                </button>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded bg-emerald-600 text-black text-[10px] font-bold"
+                  onClick={() => openStudioArPublish(m)}
+                >
+                  Publish WebAR
                 </button>
               </div>
             ) : null}
@@ -419,10 +484,27 @@ export function StudioAiChat({ projectId, compact, themeMuted, themeInk, uiTheme
         ) : null}
         <p className={`text-[10px] flex items-center gap-1.5 ${themeMuted}`}>
           <Box className="w-3.5 h-3.5 shrink-0" />
-          When a GLB is ready it attaches to this project. Not satisfied? Use &quot;Hire a 3D designer&quot; above for pro
-          refinement.
+          When a GLB is ready it attaches to this project. Use <strong className="text-white/70">Publish WebAR</strong>{' '}
+          for the same customization dialog as the main studio. Not satisfied? Hire a designer above.
         </p>
       </div>
+
+      {project ? (
+        <StudioPublishDialog
+          open={arPubOpen}
+          busy={arPubBusy}
+          projectName={project.name}
+          defaults={{
+            arPageTitle: project.arPageTitle || project.name,
+            arPageTagline: project.arPageTagline || project.description?.slice(0, 280) || '',
+            arCtaLabel: project.arCtaLabel || 'View in your space',
+            arAccentHex: project.arAccentHex || '#10b981',
+            arSharePublic: project.arSharePublic !== false,
+          }}
+          onClose={() => !arPubBusy && setArPubOpen(false)}
+          onConfirm={confirmStudioArPublish}
+        />
+      ) : null}
     </div>
   );
 }

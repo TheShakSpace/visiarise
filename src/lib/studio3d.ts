@@ -88,9 +88,15 @@ export function arrayBufferToGlbDataUrl(buffer: ArrayBuffer): string {
 }
 
 export async function exportObject3DToGlbDataUrl(root: THREE.Object3D): Promise<string> {
+  const buffer = await exportObject3DToGlbArrayBuffer(root);
+  return arrayBufferToGlbDataUrl(buffer);
+}
+
+/** Binary GLB for upload (e.g. public WebAR hosting). */
+export async function exportObject3DToGlbArrayBuffer(root: THREE.Object3D): Promise<ArrayBuffer> {
   const exporter = new GLTFExporter();
   const result = await exporter.parseAsync(root, { binary: true });
-  if (result instanceof ArrayBuffer) return arrayBufferToGlbDataUrl(result);
+  if (result instanceof ArrayBuffer) return result;
   throw new Error('Expected GLB binary output');
 }
 

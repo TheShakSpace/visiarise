@@ -16,8 +16,9 @@ const connectToMongo = async (mongoUri) => {
     brew services start mongodb-community@8.0
     # or: mongod --config /opt/homebrew/etc/mongod.conf
 
-  Or use MongoDB Atlas: set MONGO_URI in backend/.env to your
-  mongodb+srv://... connection string (Database → Connect → Drivers).
+  Or use MongoDB Atlas: set MONGO_URI to your mongodb+srv://... string
+  (Atlas → Database → Connect → Drivers). On Railway, add that as a
+  backend service Variable (not only in a local .env file).
 
   Current URI: ${mongoUri.replace(/:[^:@/]+@/, ':****@')}
 `);

@@ -11,5 +11,8 @@
       "tsconfig.json",
       "tsconfig.*.json"
     ]
+  },
+  "deploy": {
+    "startCommand": "npm run preview"
   }
 }

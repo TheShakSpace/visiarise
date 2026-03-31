@@ -110,12 +110,20 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    optimizeDeps: {
+      include: ['three', '@react-three/fiber', '@react-three/drei', '@google/model-viewer'],
+    },
     build: {
       rollupOptions: {
         output: {
           manualChunks(id) {
-            if (id.includes('node_modules/three')) return 'three';
-            if (id.includes('node_modules/@react-three')) return 'r3f';
+            if (
+              id.includes('node_modules/three') ||
+              id.includes('node_modules/@react-three') ||
+              id.includes('node_modules/@google/model-viewer')
+            ) {
+              return 'three-vendor';
+            }
             if (id.includes('node_modules/firebase')) return 'firebase';
             if (id.includes('node_modules/gsap')) return 'gsap';
           },

@@ -136,5 +136,13 @@ export default defineConfig(({mode}) => {
         },
       },
     },
+    preview: {
+      host: true,
+      /**
+       * Vite 6+ blocks unknown `Host` headers (403). Railway public domains
+       * (e.g. *.up.railway.app) are not in the default allowlist — required for SPA routes like /dashboard.
+       */
+      allowedHosts: true,
+    },
   };
 });

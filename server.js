@@ -1,5 +1,5 @@
 const path = require('path');
-// Always load backend/.env — not cwd — so `node backend/server.js` from repo root still uses Atlas/JWT from this folder.
+// Load .env next to this file (works for repo root on the backend-only deploy branch).
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const connectToMongo = require('./db');
 const createApp = require('./createApp');
@@ -7,22 +7,32 @@ const createApp = require('./createApp');
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/meshy';
 const app = createApp();
 
-async function start() {
-  await connectToMongo(MONGO_URI);
-  const PORT = process.env.PORT || 5000;
-  const server = app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+function start() {
+  const PORT = Number(process.env.PORT) || 5000;
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server listening on 0.0.0.0:${PORT}`);
     console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
   });
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.error(
-        `\n❌ Port ${PORT} is already in use. Either stop the other process (e.g. lsof -i :${PORT}) or set PORT=5001 in backend/.env\n`
+        `\n❌ Port ${PORT} is already in use. Stop the other process or set PORT in .env.\n`
       );
     } else {
       console.error(err);
     }
     process.exit(1);
+  });
+
+  // Listen before Mongo so Railway /health succeeds even if Atlas is slow or misconfigured.
+  connectToMongo(MONGO_URI).catch((err) => {
+    console.error('❌ MongoDB connection failed:', err.message);
+    console.error(
+      '→ Set MONGO_URI in Railway and allow Atlas Network Access for this host (e.g. 0.0.0.0/0 for testing).'
+    );
+    if (process.env.EXIT_ON_DB_FAILURE === '1') {
+      process.exit(1);
+    }
   });
 }
 

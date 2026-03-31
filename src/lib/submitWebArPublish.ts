@@ -17,7 +17,14 @@ export async function submitWebArPublish(
   });
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(t || res.statusText);
+    let msg = t || res.statusText;
+    try {
+      const j = JSON.parse(t) as { message?: string };
+      if (typeof j?.message === 'string' && j.message.trim()) msg = j.message.trim();
+    } catch {
+      /* use raw body */
+    }
+    throw new Error(msg);
   }
   await apiFetch(`/api/projects/${projectId}`, {
     method: 'PATCH',

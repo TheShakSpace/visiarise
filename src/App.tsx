@@ -6,7 +6,7 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAppStore } from './store/useAppStore';
 import { AnimatePresence } from 'motion/react';
-import { Suspense, lazy, useState } from 'react';
+import { Suspense, lazy, useState, useEffect } from 'react';
 import Onboarding from './components/Onboarding';
 import LoadingScreen from './components/LoadingScreen';
 import PurpleBallCursor from './components/PurpleBallCursor';
@@ -31,9 +31,13 @@ const Cart = lazy(() => import('./pages/Cart'));
 const PricingPage = lazy(() => import('./pages/PricingPage'));
 
 export default function App() {
-  const { user, onboardingCompleted, setOnboardingCompleted } = useAppStore();
+  const { user, onboardingCompleted, setOnboardingCompleted, syncProjectsFromServer } = useAppStore();
   const location = useLocation();
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (user?.token) void syncProjectsFromServer();
+  }, [user?.token, syncProjectsFromServer]);
 
   return (
     <div className="min-h-screen bg-black text-white selection:bg-white/20">

@@ -833,7 +833,12 @@ export default function Studio() {
       navigate(`/ar/${id}`);
     } catch (e) {
       console.error(e);
-      showStatus('Publish failed — check connection, sign in, or try a smaller scene');
+      const raw = e instanceof Error ? e.message : String(e);
+      const actionable =
+        raw.includes('Project not found') || raw.includes('Invalid project id')
+          ? 'This project is not on the server. Open Dashboard (while signed in), create or pick a project, then publish again.'
+          : `Publish failed — ${raw}`;
+      showStatus(actionable);
     } finally {
       setIsPublishing(false);
     }
@@ -1022,6 +1027,37 @@ export default function Studio() {
       const n = prev.filter((x) => x !== extraId);
       return n.length === 0 && primarySource ? [PRIMARY_ID] : n;
     });
+  };
+
+  const removePrimaryModel = () => {
+    if (!id) return;
+    const cur = useAppStore.getState().projects.find((x) => x.id === id);
+    if (!cur || !(cur.modelDataUrl || cur.modelUrl)) return;
+    const st = { ...(cur.studioTransforms || {}) };
+    delete st[PRIMARY_ID];
+    const rigs = { ...(cur.studioRigs || {}) };
+    delete rigs[PRIMARY_ID];
+    updateProject(id, {
+      modelUrl: null,
+      modelDataUrl: null,
+      thumbnailUrl: null,
+      meshyPreviewTaskId: null,
+      meshyTaskId: null,
+      modelUrls: null,
+      studioTransforms: st,
+      studioRigs: rigs,
+    });
+    selectionPrimedRef.current = false;
+    setSelectionIds((prev) => {
+      if (!prev.includes(PRIMARY_ID)) return prev;
+      const n = prev.filter((x) => x !== PRIMARY_ID);
+      if (n.length > 0) return n;
+      const firstEx = cur.studioExtras?.[0];
+      if (firstEx) return [firstEx.id];
+      if (cur.logoDataUrl) return [LOGO_ID];
+      return [];
+    });
+    showStatus('Main model removed');
   };
 
   const clearLogo = () => {
@@ -1708,6 +1744,20 @@ export default function Studio() {
                       <Box className="w-4 h-4 text-brand-primary shrink-0" />
                       <span className={`text-sm font-medium truncate opacity-90 ${themeInk}`}>{entry.label}</span>
                     </div>
+                    {entry.kind === 'primary' && (
+                      <button
+                        type="button"
+                        className="text-white/30 hover:text-red-400 p-1"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removePrimaryModel();
+                        }}
+                        aria-label="Remove main model"
+                        title="Remove main model"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                     {entry.kind === 'extra' && (
                       <button
                         type="button"
@@ -2304,9 +2354,7 @@ export default function Studio() {
                   const sid = gizmoTargetId;
                   if (!id || !sid) return;
                   if (sid === PRIMARY_ID) {
-                    updateProject(id, { modelDataUrl: undefined, modelUrl: undefined });
-                    selectionPrimedRef.current = false;
-                    setSelectionIds([]);
+                    removePrimaryModel();
                   } else if (sid !== LOGO_ID) removeExtra(sid);
                 }}
                 disabled={

@@ -27,6 +27,7 @@ import Navbar from '../components/Navbar';
 import { ArdyaWordmark } from '../components/ArdyaWordmark';
 import { Link, useLocation } from 'react-router-dom';
 import DroneScene from '../components/DroneScene';
+import { useGLTF } from '@react-three/drei';
 import {
   LANDING_DEMO_SCENES,
   HERO_DECK_COPY,
@@ -146,22 +147,6 @@ const HeroDeckAccentLine = memo(
     prev.phrases === next.phrases
 );
 
-const HERO_PIN_MIN_WIDTH = 1024;
-
-function useMinWidthLg() {
-  const [matches, setMatches] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(`(min-width: ${HERO_PIN_MIN_WIDTH}px)`).matches
-  );
-  useEffect(() => {
-    const mq = window.matchMedia(`(min-width: ${HERO_PIN_MIN_WIDTH}px)`);
-    const onChange = () => setMatches(mq.matches);
-    mq.addEventListener('change', onChange);
-    onChange();
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-  return matches;
-}
-
 /** Panels 2–4 (and reduced-motion panel 1): glass preview + GLB when scrolled into view */
 function HeroStaticDemoCard({
   scene,
@@ -175,7 +160,7 @@ function HeroStaticDemoCard({
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
-      className="demo-ardya-glass relative isolate z-10 flex h-[min(340px\\,52vh)] w-full max-w-full flex-col overflow-hidden rounded-[1.75rem] sm:h-[min(400px\\,58vh)] sm:max-w-md sm:rounded-[2rem] lg:h-[min(560px\\,72vh)]"
+      className="demo-ardya-glass relative isolate z-10 flex w-full max-w-full flex-col overflow-hidden rounded-[1.75rem] sm:max-w-md sm:rounded-[2rem]"
     >
       <div
         aria-hidden
@@ -185,13 +170,13 @@ function HeroStaticDemoCard({
         <ArdyaWordmark />
         <div className="text-[9px] font-medium tracking-wide text-white/45">Preview · {scene.label}</div>
       </div>
-      <div className="demo-ardya-glass__stage relative z-10 flex min-h-0 flex-1 flex-col">
-        <div className="relative min-h-[240px] flex-1">
+      <div className="demo-ardya-glass__stage relative z-10 h-[268px] w-full shrink-0 overflow-hidden sm:h-[300px]">
+        <div className="relative h-full w-full min-h-0">
           {live ? (
             <DroneScene
               key={scene.id}
               frame="hero"
-              modelScale={scene.modelScale ?? 1}
+              modelScale={(scene.modelScale ?? 1) * 1.08}
               modelUrl={scene.modelUrl}
               interactive
               className="absolute inset-0 h-full w-full"
@@ -206,18 +191,18 @@ function HeroStaticDemoCard({
             />
           )}
         </div>
-        <div className="relative z-10 flex flex-col gap-2 border-t border-white/10 bg-black/20 px-3 py-3 backdrop-blur-md sm:px-4">
-          <p className="line-clamp-2 text-[10px] leading-snug text-white/50">{scene.prompt}</p>
-          <a
-            href={buildTryArUrl(scene.modelUrl, `Landing · ${scene.label}`)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex w-fit items-center gap-2 rounded-full bg-white/92 px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-zinc-900"
-          >
-            <Smartphone className="h-3 w-3" />
-            Open AR
-          </a>
-        </div>
+      </div>
+      <div className="relative z-10 flex shrink-0 flex-col gap-2 border-t border-white/10 bg-black/20 px-3 py-3 backdrop-blur-md sm:px-4">
+        <p className="line-clamp-2 text-[10px] leading-snug text-white/50">{scene.prompt}</p>
+        <a
+          href={buildTryArUrl(scene.modelUrl, `Landing · ${scene.label}`)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex w-fit items-center gap-2 rounded-full bg-white/92 px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-zinc-900"
+        >
+          <Smartphone className="h-3 w-3" />
+          Open AR
+        </a>
       </div>
       <div className="demo-ardya-glass__footer relative z-10 flex shrink-0 border-t border-white/[0.09] px-3 py-3 sm:px-4">
         <div className="w-full truncate rounded-full border border-white/[0.1] bg-black/12 px-3 py-2 text-[10px] text-white/40 backdrop-blur-lg">
@@ -232,17 +217,18 @@ export default function LandingPage() {
   const location = useLocation();
   const containerRef = useRef<HTMLDivElement>(null);
   const droneRef = useRef<HTMLDivElement>(null);
-  const heroTrackRef = useRef<HTMLDivElement>(null);
-  const heroDotsRef = useRef<HTMLDivElement>(null);
   const [demoPhase, setDemoPhase] = useState<DemoPhase>(0);
-  const [heroActivePanel, setHeroActivePanel] = useState(0);
   const [demoIndex, setDemoIndex] = useState(0);
   const [inputText, setInputText] = useState('');
   const reduceUiMotion = useReducedMotion() ?? false;
-  const lgHeroPin = useMinWidthLg();
-  /** Horizontal scrub + pin only on large screens; mobile/tablet stacks slides vertically so you can scroll to each demo */
-  const deckIsHorizontal = lgHeroPin && !reduceUiMotion;
   const activeDemo = LANDING_DEMO_SCENES[demoIndex] ?? LANDING_DEMO_SCENES[0];
+  const heroCopy = HERO_DECK_COPY[0]!;
+
+  useEffect(() => {
+    for (const s of LANDING_DEMO_SCENES) {
+      useGLTF.preload(s.modelUrl);
+    }
+  }, []);
 
   const [lightMedia, setLightMedia] = useState(() => prefersLightMedia());
   useEffect(() => {
@@ -310,7 +296,7 @@ export default function LandingPage() {
   }, [location.pathname, location.hash]);
 
   useEffect(() => {
-    if (reduceUiMotion || heroActivePanel !== 0) return;
+    if (reduceUiMotion) return;
     let isMounted = true;
     const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const prompt = activeDemo.prompt;
@@ -364,65 +350,20 @@ export default function LandingPage() {
     return () => {
       isMounted = false;
     };
-  }, [heroActivePanel, reduceUiMotion, demoIndex, activeDemo.prompt]);
+  }, [reduceUiMotion, demoIndex, activeDemo.prompt]);
 
   useEffect(() => {
-    if (demoPhase < 6 || heroActivePanel !== 0) return;
+    if (demoPhase < 6) return;
     try {
       localStorage.setItem('visiarise-ar-model', activeDemo.modelUrl);
     } catch {
       /* ignore quota */
     }
-  }, [demoPhase, heroActivePanel, activeDemo.modelUrl]);
-
-  useEffect(() => {
-    if (deckIsHorizontal) return;
-    const root = containerRef.current?.querySelector('#hero');
-    if (!root) return;
-    const panels = root.querySelectorAll<HTMLElement>('[data-hero-panel]');
-    if (panels.length === 0) return;
-    const narrow = typeof window !== 'undefined' && window.innerWidth < HERO_PIN_MIN_WIDTH;
-    let lastReported = -1;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        const best = entries
-          .filter((e) => e.isIntersecting && e.intersectionRatio > 0.08)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        const idx = best?.target.getAttribute('data-hero-panel');
-        if (idx == null) return;
-        const n = Number(idx);
-        if (Number.isNaN(n) || n === lastReported) return;
-        lastReported = n;
-        setHeroActivePanel(n);
-      },
-      {
-        root: null,
-        threshold: [0.2, 0.45, 0.72],
-        rootMargin: narrow ? '-2% 0px -4% 0px' : '-8% 0px -12% 0px',
-      }
-    );
-    panels.forEach((p) => obs.observe(p));
-    return () => obs.disconnect();
-  }, [deckIsHorizontal]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!deckIsHorizontal) {
-      const st = ScrollTrigger.getById('hero-deck');
-      st?.kill(true);
-      const tr = heroTrackRef.current;
-      if (tr) gsap.set(tr, { xPercent: 0, clearProps: 'transform' });
-    }
-    const id = requestAnimationFrame(() => {
-      ScrollTrigger.refresh();
-    });
-    return () => cancelAnimationFrame(id);
-  }, [deckIsHorizontal]);
+  }, [demoPhase, activeDemo.modelUrl]);
 
   // Scroll Animations
   useEffect(() => {
     let mm: { revert: () => void } | undefined;
-    let heroDeckMm: { revert: () => void } | undefined;
     const ctx = gsap.context(() => {
       if (droneRef.current) {
         gsap.to(droneRef.current, {
@@ -456,62 +397,6 @@ export default function LandingPage() {
           force3D: true,
         }
       );
-
-      heroDeckMm = ScrollTrigger.matchMedia({
-        [`(min-width: ${HERO_PIN_MIN_WIDTH}px) and (prefers-reduced-motion: no-preference)`]: () => {
-          const heroSection = containerRef.current?.querySelector("#hero");
-          const heroTrack = heroTrackRef.current;
-          if (!heroSection || !heroTrack) return () => {};
-          const deckSteps = LANDING_DEMO_SCENES.length;
-          const snapInc = 1 / Math.max(1, deckSteps - 1);
-          const deckShiftPct = -((deckSteps - 1) / deckSteps) * 100;
-          let lastDeckIdx = -1;
-          const tween = gsap.to(heroTrack, {
-            xPercent: deckShiftPct,
-            ease: "none",
-            force3D: true,
-            scrollTrigger: {
-              id: "hero-deck",
-              trigger: heroSection,
-              start: "top top",
-              end: () =>
-                `+=${Math.round(window.innerHeight * (window.innerWidth < 768 ? 1.35 : 1.65))}`,
-              pin: true,
-              scrub: 0.45,
-              invalidateOnRefresh: true,
-              anticipatePin: 0,
-              fastScrollEnd: true,
-              snap: {
-                snapTo: snapInc,
-                duration: { min: 0.1, max: 0.22 },
-                delay: 0,
-                ease: "power2.out",
-                inertia: false,
-              },
-              onUpdate: (self) => {
-                const p = self.progress;
-                const idx = Math.min(
-                  deckSteps - 1,
-                  Math.max(0, Math.round(p / snapInc))
-                );
-                if (idx === lastDeckIdx) return;
-                lastDeckIdx = idx;
-                setHeroActivePanel(idx);
-                const dots = heroDotsRef.current?.querySelectorAll("[data-hero-dot]");
-                dots?.forEach((el, i) => {
-                  el.classList.toggle("is-active", i === idx);
-                });
-              },
-            },
-          });
-          return () => {
-            tween.scrollTrigger?.kill();
-            tween.kill();
-            const tr = heroTrackRef.current;
-            if (tr) gsap.set(tr, { xPercent: 0 });
-          };
-        },
-      }) as unknown as { revert: () => void };
 
       mm = ScrollTrigger.matchMedia({
         "(prefers-reduced-motion: reduce)": () => {
@@ -577,7 +462,6 @@ export default function LandingPage() {
     }, containerRef);
 
     return () => {
-      heroDeckMm?.revert();
       mm?.revert();
       ctx.revert();
     };
@@ -610,14 +494,10 @@ export default function LandingPage() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%\\,rgb(255_255_255_/_0.06)_0%\\,transparent_55%)]" />
       </div>
 
-      {/* 1. Hero — pinned horizontal deck: 4 screens (demo + VisiARise story each) */}
+      {/* 1. Hero — single viewport (no horizontal scroll deck) */}
       <section
         id="hero"
-        className={
-          deckIsHorizontal
-            ? 'relative isolate min-h-[100dvh] min-h-screen overflow-hidden overscroll-x-contain'
-            : 'relative isolate min-h-0 min-h-[100dvh] touch-pan-y overflow-x-clip overflow-y-visible'
-        }
+        className="relative isolate min-h-0 min-h-[100dvh] touch-pan-y overflow-x-clip overflow-y-visible"
       >
         <div className="pointer-events-none absolute inset-0 z-0">
           {lightMedia ? (
@@ -640,110 +520,73 @@ export default function LandingPage() {
           <div className="absolute inset-0 bg-[linear-gradient(90deg\\,transparent_0%\\,rgb(255_255_255_/_0.025)_50%\\,transparent_100%)]" aria-hidden />
         </div>
 
-        <div
-          className={
-            deckIsHorizontal
-              ? 'relative z-10 min-h-[100dvh] min-h-screen w-full max-w-[100vw] overflow-x-hidden'
-              : 'relative z-10 w-full max-w-[100vw] overflow-x-hidden'
-          }
-        >
-          <div
-            ref={heroTrackRef}
-            className={
-              !deckIsHorizontal
-                ? "flex w-full flex-col gap-14 sm:gap-20 py-8 sm:py-12"
-                : "flex min-h-[100dvh] min-h-screen max-w-none flex-none flex-nowrap flex-row will-change-transform"
-            }
-            style={
-              !deckIsHorizontal
-                ? undefined
-                : { width: `${LANDING_DEMO_SCENES.length * 100}vw` }
-            }
-          >
-            {LANDING_DEMO_SCENES.map((scene, panelIdx) => {
-              const copy = HERO_DECK_COPY[panelIdx];
-              if (!copy) return null;
-              const isFirst = panelIdx === 0;
-              return (
-                <div
-                  key={scene.id}
-                  data-hero-panel={panelIdx}
-                  className={
-                    !deckIsHorizontal
-                      ? "flex w-full shrink-0 justify-center px-4 sm:px-6 md:px-20"
-                      : `box-border flex min-h-[100dvh] min-h-screen w-[100vw] min-w-[100vw] max-w-[100vw] flex-none shrink-0 items-start px-4 pt-10 sm:px-6 sm:pt-14 md:px-8 md:pt-16 lg:px-12 xl:px-16 ${panelIdx > 0 ? "border-l border-white/[0.07]" : ""}`
-                  }
+        <div className="relative z-10 w-full max-w-[100vw] overflow-x-hidden">
+          <div className="flex w-full flex-col gap-14 sm:gap-20 py-8 sm:py-12">
+            <div className="flex w-full shrink-0 justify-center px-4 sm:px-6 md:px-20">
+              <div className="mx-auto grid w-full max-w-7xl grid-cols-1 items-start gap-8 pb-8 pt-20 sm:gap-10 sm:pb-10 sm:pt-24 md:pt-28 md:pb-14 lg:grid-cols-2 lg:gap-12 lg:pb-16 lg:pt-28">
+                <motion.div
+                  initial={{ opacity: 0, x: -28 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.75, ease: [0.22, 1, 0.36, 1] }}
+                  className="relative z-10 mx-auto w-full max-w-xl lg:mx-0 lg:max-w-none"
                 >
-                  <div className="mx-auto grid w-full max-w-7xl grid-cols-1 items-start gap-8 pb-8 pt-20 sm:gap-10 sm:pb-10 sm:pt-24 md:pt-28 md:pb-14 lg:grid-cols-2 lg:gap-12 lg:pb-16 lg:pt-28">
-                    <motion.div
-                      initial={{ opacity: 0, x: -28 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.75, ease: [0.22, 1, 0.36, 1] }}
-                      className="relative z-10 mx-auto w-full max-w-xl lg:mx-0 lg:max-w-none"
+                  <div className="mb-4 inline-flex flex-wrap items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.25em] text-brand-muted backdrop-blur-xl">
+                    <Leaf className="h-3 w-3 text-emerald-400/90" />
+                    <span>{heroCopy.badges[0]}</span>
+                  </div>
+                  <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.3em] text-brand-muted backdrop-blur-xl">
+                    <Sparkles className="h-3 w-3 shrink-0 text-zinc-300/90" />
+                    <span>{heroCopy.badges[1]}</span>
+                  </div>
+                  <h1 className="mb-6 max-w-xl font-display text-4xl font-bold leading-[1.15] tracking-tight sm:text-5xl md:text-5xl lg:text-6xl">
+                    <span className="block sm:inline">{heroCopy.heroLead} </span>
+                    <HeroDeckAccentLine
+                      panelIdx={0}
+                      activePanel={0}
+                      phrases={heroCopy.heroAccentPhrases}
+                    />
+                  </h1>
+                  <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.38em] text-white/40">{heroCopy.kicker}</p>
+                  <p className="mb-6 max-w-xl text-sm leading-relaxed text-white/55 sm:text-base">{heroCopy.subtitle}</p>
+                  <p className="mb-8 max-w-xl border-l border-emerald-500/25 pl-4 text-sm leading-relaxed text-white/50">
+                    {heroCopy.quote}
+                  </p>
+                  <ul className="mb-10 max-w-xl space-y-3">
+                    {heroCopy.bullets.map((b) => (
+                      <li key={b} className="flex gap-3 text-sm text-white/72">
+                        <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-white/35" aria-hidden />
+                        {b}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center">
+                    <Link to="/login" className="btn-neon-purple group w-full px-8 py-3.5 text-sm sm:w-auto">
+                      Start Creating
+                      <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                    </Link>
+                    <Link
+                      to={heroCopy.secondaryCta.to}
+                      className="w-full rounded-full border border-white/15 bg-white/5 px-8 py-3.5 text-center text-sm font-semibold text-white backdrop-blur-md transition-all hover:bg-white/10 sm:w-auto"
                     >
-                      <div className="mb-4 inline-flex flex-wrap items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.25em] text-brand-muted backdrop-blur-xl">
-                        <Leaf className="h-3 w-3 text-emerald-400/90" />
-                        <span>{copy.badges[0]}</span>
-                      </div>
-                      <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.3em] text-brand-muted backdrop-blur-xl">
-                        <Sparkles className="h-3 w-3 shrink-0 text-zinc-300/90" />
-                        <span>{copy.badges[1]}</span>
-                      </div>
-                      <h1 className="mb-6 max-w-xl font-display text-4xl font-bold leading-[1.15] tracking-tight sm:text-5xl md:text-5xl lg:text-6xl">
-                        <span className="block sm:inline">{copy.heroLead} </span>
-                        <HeroDeckAccentLine
-                          panelIdx={panelIdx}
-                          activePanel={heroActivePanel}
-                          phrases={copy.heroAccentPhrases}
-                        />
-                      </h1>
-                      <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.38em] text-white/40">{copy.kicker}</p>
-                      <p className="mb-6 max-w-xl text-sm leading-relaxed text-white/55 sm:text-base">{copy.subtitle}</p>
-                      <p className="mb-8 max-w-xl border-l border-emerald-500/25 pl-4 text-sm leading-relaxed text-white/50">
-                        {copy.quote}
-                      </p>
-                      <ul className="mb-10 max-w-xl space-y-3">
-                        {copy.bullets.map((b) => (
-                          <li key={b} className="flex gap-3 text-sm text-white/72">
-                            <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-white/35" aria-hidden />
-                            {b}
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center">
-                        <Link to="/login" className="btn-neon-purple group w-full px-8 py-3.5 text-sm sm:w-auto">
-                          Start Creating
-                          <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
-                        </Link>
-                        <Link
-                          to={copy.secondaryCta.to}
-                          className="w-full rounded-full border border-white/15 bg-white/5 px-8 py-3.5 text-center text-sm font-semibold text-white backdrop-blur-md transition-all hover:bg-white/10 sm:w-auto"
-                        >
-                          {copy.secondaryCta.label}
-                        </Link>
-                        <Link
-                          to="/login"
-                          className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/45 transition-colors hover:text-white/85"
-                        >
-                          Enter workspace →
-                        </Link>
-                      </div>
-                    </motion.div>
+                      {heroCopy.secondaryCta.label}
+                    </Link>
+                    <Link
+                      to="/login"
+                      className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/45 transition-colors hover:text-white/85"
+                    >
+                      Enter workspace →
+                    </Link>
+                  </div>
+                </motion.div>
 
-                    <div
-                      className={
-                        deckIsHorizontal
-                          ? 'relative z-10 order-2 flex min-h-[520px] w-full items-stretch justify-center sm:min-h-[600px] lg:order-none lg:min-h-[640px]'
-                          : 'relative z-10 order-2 flex min-h-[min(22rem\\,52vh)] w-full items-stretch justify-center sm:min-h-[min(24rem\\,50vh)] lg:order-none'
-                      }
-                    >
-                      <motion.div
-                        aria-hidden
-                        className="pointer-events-none absolute inset-0 max-lg:left-1/2 max-lg:w-[min(100%\\,520px)] max-lg:-translate-x-1/2 scale-110 rounded-full bg-zinc-950/30 opacity-30 blur-[88px]"
-                        animate={{ opacity: [0.16, 0.26, 0.16] }}
-                        transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-                      />
-                      {isFirst && !reduceUiMotion ? (
+                <div className="relative z-10 order-2 flex min-h-[520px] w-full items-stretch justify-center sm:min-h-[600px] lg:order-none lg:min-h-[640px]">
+                  <motion.div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 max-lg:left-1/2 max-lg:w-[min(100%\\,520px)] max-lg:-translate-x-1/2 scale-110 rounded-full bg-zinc-950/30 opacity-30 blur-[88px]"
+                    animate={{ opacity: [0.16, 0.26, 0.16] }}
+                    transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+                  />
+                  {!reduceUiMotion ? (
                         <div className="relative z-10 flex w-full max-w-full flex-col gap-3 lg:max-w-md">
                           <div>
                             <p className="mb-2 text-[9px] font-bold uppercase tracking-[0.22em] text-white/45">
@@ -779,14 +622,10 @@ export default function LandingPage() {
                           </div>
                         <motion.div
                           id="ardya-demo"
-                          initial={{ opacity: 0, y: 20, scale: 0.99 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          initial={{ opacity: 0, y: 12 }}
+                          animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 1, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
-                          className={
-                            deckIsHorizontal
-                              ? 'demo-ardya-glass relative isolate z-10 flex h-[min(520px\\,70vh)] w-full max-w-full flex-col overflow-hidden rounded-[1.75rem] sm:rounded-[2rem]'
-                              : 'demo-ardya-glass relative isolate z-10 flex h-[min(400px\\,58dvh)] w-full max-w-full flex-col overflow-hidden rounded-[1.75rem] sm:rounded-[2rem]'
-                          }
+                          className="demo-ardya-glass relative isolate z-10 flex w-full max-w-full shrink-0 flex-col overflow-hidden rounded-[1.75rem] sm:rounded-[2rem]"
                         >
                           <div
                             aria-hidden
@@ -796,7 +635,7 @@ export default function LandingPage() {
                             aria-hidden
                             className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-16 bg-[radial-gradient(ellipse_at_100%_100%\\,rgb(255_255_255_/_0.03)_0%\\,transparent_45%)]"
                           />
-                          <div className="demo-ardya-glass__header relative z-10 flex shrink-0 flex-col gap-3 border-b border-white/[0.09] p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-3 sm:p-5">
+                          <div className="demo-ardya-glass__header relative z-10 flex min-h-[5.25rem] shrink-0 flex-col gap-3 border-b border-white/[0.09] p-4 sm:min-h-[4.75rem] sm:flex-row sm:items-start sm:justify-between sm:gap-3 sm:p-5">
                             <div className="flex min-w-0 flex-col gap-0.5">
                               <ArdyaWordmark />
                               <div className="text-[9px] font-medium tracking-wide text-white/45">Text & image → AR</div>
@@ -828,9 +667,9 @@ export default function LandingPage() {
                             </div>
                           </div>
 
-                          <div className="demo-ardya-glass__stage relative z-10 flex min-h-0 flex-1 flex-col">
+                          <div className="demo-ardya-glass__stage relative z-10 flex h-[320px] w-full shrink-0 flex-col overflow-hidden sm:h-[360px] lg:h-[384px]">
                             {demoPhase === 0 && (
-                              <div className="flex flex-1 items-center justify-center px-5 py-6">
+                              <div className="flex min-h-0 flex-1 items-center justify-center px-5 py-6">
                                 <p className="max-w-[280px] text-center text-[11px] leading-relaxed text-brand-muted">
                                   Type a prompt in Ardya. We generate a concept from your brief, then you convert to a real GLB and open in AR — using local assets in this demo.
                                 </p>
@@ -929,15 +768,15 @@ export default function LandingPage() {
                             )}
 
                             {(demoPhase === 6 || demoPhase === 7) && (
-                              <div className="relative min-h-0 flex-1">
-                                <div ref={droneRef} className="absolute inset-0 z-0">
+                              <div className="relative h-full w-full min-h-0">
+                                <div ref={droneRef} className="absolute inset-0 z-0 h-full w-full min-h-[200px]">
                                   <DroneScene
                                     key={activeDemo.id}
                                     frame="hero"
-                                    modelScale={activeDemo.modelScale ?? 1}
+                                    modelScale={(activeDemo.modelScale ?? 1) * 1.08}
                                     modelUrl={activeDemo.modelUrl}
                                     interactive
-                                    className="h-full w-full"
+                                    className="h-full w-full min-h-[200px]"
                                   />
                                 </div>
                                 {demoPhase === 7 && (
@@ -991,48 +830,22 @@ export default function LandingPage() {
                         </motion.div>
                         </div>
                       ) : (
-                        <HeroStaticDemoCard scene={scene} live={!reduceUiMotion && heroActivePanel === panelIdx} />
+                        <HeroStaticDemoCard scene={LANDING_DEMO_SCENES[0]!} live={false} />
                       )}
-                    </div>
-                  </div>
                 </div>
-              );
-            })}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Slide dots only — vertical stack, left corner (GSAP toggles .is-active via heroDotsRef) */}
-        <div
-          ref={heroDotsRef}
-          className="pointer-events-none absolute left-4 z-20 flex flex-col gap-2 sm:left-5 [bottom:max(6.25rem\\,env(safe-area-inset-bottom))] lg:bottom-auto lg:left-8 lg:top-[44%] lg:-translate-y-1/2 xl:left-10"
-          aria-hidden
-        >
-          {deckIsHorizontal &&
-            LANDING_DEMO_SCENES.map((s, i) => (
-              <div key={s.id} data-hero-dot className={`hero-scroll-dot${i === 0 ? ' is-active' : ''}`} />
-            ))}
-        </div>
-
-        {/* Scroll hint — centered bottom (original placement) */}
-        <div
-          className={`pointer-events-none absolute left-1/2 z-20 flex -translate-x-1/2 flex-col items-center ${
-            deckIsHorizontal
-              ? '[bottom:max(1.25rem\\,env(safe-area-inset-bottom))] sm:bottom-8'
-              : '[bottom:max(0.75rem\\,env(safe-area-inset-bottom))] sm:bottom-6'
-          }`}
-        >
+        {/* Scroll hint — centered bottom */}
+        <div className="pointer-events-none absolute left-1/2 z-20 flex -translate-x-1/2 flex-col items-center [bottom:max(0.75rem\\,env(safe-area-inset-bottom))] sm:bottom-6">
           <motion.div
             animate={reduceUiMotion ? undefined : { y: [0, 10, 0] }}
             transition={{ duration: 2, repeat: Infinity }}
             className="flex flex-col items-center gap-2"
           >
-            {!reduceUiMotion && deckIsHorizontal && (
-              <div className="mb-1 flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-[0.35em] text-white/50">
-                <span>Scroll</span>
-                <span className="text-white/30">→</span>
-              </div>
-            )}
-            {!reduceUiMotion && !deckIsHorizontal && (
+            {!reduceUiMotion && (
               <div className="mb-1 flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-[0.35em] text-white/50">
                 <span>Scroll</span>
                 <span className="text-white/30">↓</span>
@@ -1040,7 +853,7 @@ export default function LandingPage() {
             )}
             <div className="h-px w-12 bg-gradient-to-r from-transparent via-white/50 to-transparent sm:w-16" />
             <span className="max-w-[14rem] text-center text-[8px] font-bold uppercase tracking-[0.4em] text-white/35">
-              {reduceUiMotion ? 'Scroll' : deckIsHorizontal ? 'Snap per screen' : 'Each story below'}
+              {reduceUiMotion ? 'Scroll' : 'More below'}
             </span>
           </motion.div>
         </div>

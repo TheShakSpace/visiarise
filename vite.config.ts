@@ -10,6 +10,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const demoRoot = path.resolve(__dirname, 'Demo');
 
 /** Serve `Demo/index.html` + local GLBs at `/Demo/*` during dev (folder lives at repo root, outside `public/`). */
+/** Log API proxy target so `/api` 500 + text/plain (proxy ECONNREFUSED) is easy to diagnose. */
+function apiProxyLogPlugin(apiTarget: string) {
+  return {
+    name: 'visiarise-api-proxy-log',
+    configureServer() {
+      // eslint-disable-next-line no-console
+      console.log(`\n  \x1b[36m[VisiARise]\x1b[0m /api → ${apiTarget} (start backend: cd backend && npm run dev)\n`);
+    },
+  };
+}
+
 function demoFolderPlugin() {
   return {
     name: 'visiarise-demo-folder',
@@ -54,11 +65,15 @@ function demoFolderPlugin() {
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
-  /** Backend port: must match backend/.env PORT. Default 5000 often conflicts with macOS AirPlay → 403 AirTunes. */
+  /**
+   * Prefer `VITE_DEV_API_ORIGIN` (e.g. http://127.0.0.1:5001) — do not use generic `PORT` here;
+   * root `.env` often sets PORT for the API server and it is easy to confuse with other tooling.
+   */
   const apiTarget =
-    env.VITE_DEV_API_ORIGIN || `http://127.0.0.1:${env.PORT || '5000'}`;
+    env.VITE_DEV_API_ORIGIN ||
+    `http://127.0.0.1:${env.VITE_BACKEND_PORT || '5001'}`;
   return {
-    plugins: [demoFolderPlugin(), react(), tailwindcss()],
+    plugins: [apiProxyLogPlugin(apiTarget), demoFolderPlugin(), react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
@@ -81,11 +96,9 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
-      // Fixed port so VisiARise never shares 3000 with other apps (e.g. Hoppscotch).
-      // If you still see :3000, your shell may have PORT=3000 — unset PORT or use this URL.
       port: 5173,
-      // If 5173 is taken (another Vite tab), use the next free port instead of failing.
-      strictPort: false,
+      /** Fail if 5173 is busy — avoids a second dev server on :5174 while the browser still uses :5173 (broken /api proxy). */
+      strictPort: true,
       host: true,
       watch: {
         ignored: [path.resolve(__dirname, 'backend/**')],
@@ -97,6 +110,21 @@ export default defineConfig(({mode}) => {
         '/api': {
           target: apiTarget,
           changeOrigin: true,
+          configure(proxy) {
+            proxy.on('error', (err: NodeJS.ErrnoException, _req, res) => {
+              // eslint-disable-next-line no-console
+              console.error(`[VisiARise] Proxy error /api → ${apiTarget}:`, err.message);
+              if (res && !res.headersSent && 'writeHead' in res) {
+                const r = res as import('http').ServerResponse;
+                r.writeHead(502, {'Content-Type': 'application/json'});
+                r.end(
+                  JSON.stringify({
+                    message: `API unreachable at ${apiTarget} (${err.code || err.message}). Is the backend running on that port?`,
+                  })
+                );
+              }
+            });
+          },
         },
       },
     },

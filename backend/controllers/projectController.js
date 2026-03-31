@@ -35,7 +35,14 @@ exports.createProject = async (req, res) => {
     res.status(201).json({ project: toClientProject(doc) });
   } catch (e) {
     console.error('createProject', e);
-    res.status(500).json({ message: 'Failed to create project' });
+    if (e.name === 'ValidationError') {
+      return res.status(400).json({ message: e.message || 'Invalid project data' });
+    }
+    const dev = process.env.NODE_ENV !== 'production';
+    res.status(500).json({
+      message: 'Failed to create project',
+      ...(dev && e.message ? { detail: e.message } : {}),
+    });
   }
 };
 

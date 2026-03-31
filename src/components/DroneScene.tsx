@@ -7,6 +7,7 @@ import {
   ContactShadows,
   Float,
   PresentationControls,
+  Html,
 } from '@react-three/drei';
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -26,7 +27,8 @@ type DroneSceneProps = {
 
 /** World-space target for largest bounding-box dimension after centering */
 const FIT_TARGET: Record<DroneFramePreset, number> = {
-  hero: 2.35,
+  /** Hero demo card — match readable size vs. section viewer (was 2.35, felt tiny) */
+  hero: 2.3  ,
   /** Landing “From file to AR” — sized to read large inside the 80%-width viewer */
   section: 6.1,
   default: 2.2,
@@ -36,7 +38,7 @@ const CAMERA_PRESETS: Record<
   DroneFramePreset,
   { position: [number, number, number]; fov: number }
 > = {
-  hero: { position: [0, 0.12, 5.4], fov: 48 },
+  hero: { position: [0, 0.08, 4.05], fov: 44 },
   /** Slightly wider FOV + distance so wide cars stay fully in frame while orbiting */
   section: { position: [0, 0.08, 4.85], fov: 52 },
   default: { position: [0, 0.15, 5.4], fov: 42 },
@@ -239,7 +241,16 @@ export default function DroneScene({
   const cam = CAMERA_PRESETS[frame] ?? CAMERA_PRESETS.default;
 
   return (
-    <div className={className} style={{ width: '100%', height: '100%', minHeight: 200 }}>
+    <div
+      className={className}
+      style={{
+        width: '100%',
+        height: '100%',
+        minHeight: 200,
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
       <Canvas
         shadows
         dpr={[1, 1.25]}
@@ -254,9 +265,27 @@ export default function DroneScene({
           near: 0.1,
           far: 100,
         }}
+        style={{ width: '100%', height: '100%', display: 'block' }}
       >
         <CameraRig frame={frame} />
-        <Suspense fallback={null}>
+        <Suspense
+          fallback={
+            <Html center prepend zIndexRange={[100, 0]}>
+              <div
+                role="status"
+                className="flex flex-col items-center gap-2 rounded-lg border border-white/12 bg-black/75 px-4 py-3 text-white shadow-lg backdrop-blur-sm"
+              >
+                <span
+                  className="inline-block h-7 w-7 animate-spin rounded-full border-2 border-white/25 border-t-white"
+                  aria-hidden
+                />
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/75">
+                  Loading 3D…
+                </span>
+              </div>
+            </Html>
+          }
+        >
           <SceneContent
             modelUrl={modelUrl}
             frame={frame}

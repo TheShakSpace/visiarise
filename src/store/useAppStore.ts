@@ -53,10 +53,11 @@ export interface Project {
   description: string;
   createdAt: string;
   status: 'draft' | 'published';
-  modelUrl?: string;
+  /** `null` clears the field on the next server PATCH (see `projectToRemotePatch`). */
+  modelUrl?: string | null;
   /** Inlined user upload (persists across refresh; blob: URLs do not). */
-  modelDataUrl?: string;
-  thumbnailUrl?: string;
+  modelDataUrl?: string | null;
+  thumbnailUrl?: string | null;
   /** How you use ARdya — shapes defaults in the workspace */
   useCase?: ProjectUseCase;
   /** Free-form tag e.g. footwear, automotive */
@@ -64,11 +65,11 @@ export interface Project {
   /** Extra imported models in the studio scene */
   studioExtras?: StudioExtraModel[];
   /** Last succeeded Meshy preview task id (for optional re-texture flows). */
-  meshyPreviewTaskId?: string;
+  meshyPreviewTaskId?: string | null;
   /** Latest Meshy task id for the primary model (e.g. refine). */
-  meshyTaskId?: string;
+  meshyTaskId?: string | null;
   /** Meshy export URLs (glb, fbx, usdz, …) for downloads in Studio / chat. */
-  modelUrls?: ModelUrlsPayload;
+  modelUrls?: ModelUrlsPayload | null;
   /** PNG/JPEG/WebP as data URL — shown as a plane “sticker” in scene */
   logoDataUrl?: string;
   logoScale?: number;
@@ -150,6 +151,10 @@ function projectToRemotePatch(merged: Project): Record<string, unknown> {
   const o: Record<string, unknown> = {};
   for (const k of REMOTE_PROJECT_KEYS) {
     const v = merged[k as keyof Project];
+    if (v === null) {
+      o[k] = null;
+      continue;
+    }
     if (v !== undefined) o[k] = v;
   }
   return o;
@@ -180,11 +185,11 @@ export function apiProjectToProject(p: ApiProject): Project {
     description: p.description,
     createdAt: p.createdAt || new Date().toISOString(),
     status: p.status,
-    modelUrl: p.modelUrl,
-    thumbnailUrl: p.thumbnailUrl,
-    meshyPreviewTaskId: p.meshyPreviewTaskId,
-    meshyTaskId: p.meshyTaskId,
-    modelUrls: p.modelUrls,
+    modelUrl: p.modelUrl ?? undefined,
+    thumbnailUrl: p.thumbnailUrl ?? undefined,
+    meshyPreviewTaskId: p.meshyPreviewTaskId ?? undefined,
+    meshyTaskId: p.meshyTaskId ?? undefined,
+    modelUrls: p.modelUrls ?? undefined,
     useCase: (p.useCase || '') as ProjectUseCase,
     category: p.category,
     studioTransforms: p.studioTransforms as Record<string, StudioNodeTransform> | undefined,
@@ -202,6 +207,47 @@ export function apiProjectToProject(p: ApiProject): Project {
     arCtaLabel: p.arCtaLabel,
     arAccentHex: p.arAccentHex,
   };
+}
+
+function mergeStudioExtrasFromLocal(
+  local?: StudioExtraModel[],
+  server?: StudioExtraModel[]
+): StudioExtraModel[] | undefined {
+  if (!server?.length && !local?.length) return undefined;
+  const map = new Map<string, StudioExtraModel>();
+  for (const e of server || []) {
+    map.set(e.id, { ...e });
+  }
+  for (const e of local || []) {
+    const cur = map.get(e.id);
+    if (cur) {
+      map.set(e.id, {
+        ...cur,
+        name: e.name || cur.name,
+        modelUrl: cur.modelUrl || e.modelUrl,
+        modelDataUrl: e.modelDataUrl ?? cur.modelDataUrl,
+      });
+    } else {
+      map.set(e.id, { ...e });
+    }
+  }
+  return map.size ? Array.from(map.values()) : undefined;
+}
+
+/** Server list is authoritative for which Mongo-backed projects exist; keep local-only blobs and unsigned-in projects. */
+function mergeServerProjectsWithLocal(serverList: Project[], localList: Project[]): Project[] {
+  const mergedServer = serverList.map((sp) => {
+    const local = localList.find((lp) => lp.id === sp.id);
+    if (!local) return sp;
+    return {
+      ...sp,
+      modelDataUrl: local.modelDataUrl ?? sp.modelDataUrl,
+      logoDataUrl: local.logoDataUrl ?? sp.logoDataUrl,
+      studioExtras: mergeStudioExtrasFromLocal(local.studioExtras, sp.studioExtras),
+    };
+  });
+  const localOnly = localList.filter((p) => !isMongoObjectId(p.id));
+  return [...mergedServer, ...localOnly];
 }
 
 export function apiChatToMessage(m: ApiChatMessage): ChatMessage {
@@ -434,7 +480,27 @@ export const useAppStore = create<AppState>()(
         if (!token) return;
         try {
           const { projects } = await apiFetch<ProjectsListResponse>('/api/projects', { token });
-          set({ projects: projects.map(apiProjectToProject) });
+          const serverMapped = projects.map(apiProjectToProject);
+          set((state) => ({
+            projects: mergeServerProjectsWithLocal(serverMapped, state.projects),
+          }));
+          const { projects: next, updateProject } = useAppStore.getState();
+          for (const p of next) {
+            queueMicrotask(() => {
+              void (async () => {
+                try {
+                  const heavy = await loadProjectHeavyAssets(p);
+                  const has =
+                    heavy.modelDataUrl ||
+                    heavy.logoDataUrl ||
+                    heavy.studioExtras?.some((e) => e.modelDataUrl);
+                  if (has) updateProject(p.id, heavy);
+                } catch (e) {
+                  console.warn('[VisiARise] heavy hydrate after sync failed', e);
+                }
+              })();
+            });
+          }
         } catch (e) {
           console.warn('[VisiARise] syncProjectsFromServer failed', e);
         }

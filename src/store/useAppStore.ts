@@ -479,8 +479,16 @@ export const useAppStore = create<AppState>()(
         const token = useAppStore.getState().user?.token;
         if (!token) return;
         try {
-          const { projects } = await apiFetch<ProjectsListResponse>('/api/projects', { token });
-          const serverMapped = projects.map(apiProjectToProject);
+          const data = await apiFetch<ProjectsListResponse>('/api/projects', { token });
+          const list = data?.projects;
+          if (!Array.isArray(list)) {
+            console.warn(
+              '[VisiARise] /api/projects did not return projects[] — check VITE_API_URL and backend /api/projects',
+              data
+            );
+            return;
+          }
+          const serverMapped = list.map(apiProjectToProject);
           set((state) => ({
             projects: mergeServerProjectsWithLocal(serverMapped, state.projects),
           }));

@@ -49,6 +49,21 @@ export async function apiFetch<T>(
     err.body = data;
     throw err;
   }
+
+  // SPA/static hosts often return index.html (200) for /api/* when the real API URL is not used.
+  if (
+    text &&
+    typeof text === 'string' &&
+    /^\s*</.test(text) &&
+    /<html[\s>]/i.test(text)
+  ) {
+    const err = new Error(
+      'Received HTML instead of JSON from an API path — requests may be going to the frontend server. Set VITE_API_URL to your backend base URL on the frontend Railway service, rebuild, and redeploy.'
+    ) as Error & { status?: number; body?: unknown };
+    err.status = res.status;
+    throw err;
+  }
+
   return data as T;
 }
 

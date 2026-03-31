@@ -143,6 +143,12 @@ export default defineConfig(({mode}) => {
        * (e.g. *.up.railway.app) are not in the default allowlist — required for SPA routes like /dashboard.
        */
       allowedHosts: true,
+      /**
+       * Vite merges `server.proxy` into preview by default. Without this, `vite preview` proxies `/api` to
+       * `VITE_DEV_API_ORIGIN` / 127.0.0.1:5001 — nothing listens there in a deploy container → 502.
+       * Production API calls must use `VITE_API_URL` (absolute backend URL); empty `proxy` lets non-API handling work.
+       */
+      proxy: {},
     },
   };
 });

@@ -21,6 +21,24 @@ function apiProxyLogPlugin(apiTarget: string) {
   };
 }
 
+/** Ensure production API base is baked in from Railway/CI `process.env` (build logs if missing). */
+function buildApiUrlPlugin(apiUrl: string) {
+  return {
+    name: 'visiarise-build-api-url',
+    buildStart() {
+      if (apiUrl) {
+        // eslint-disable-next-line no-console
+        console.log(`[VisiARise build] VITE_API_URL is set (production requests go to that host)`);
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[VisiARise build] VITE_API_URL is missing — built app will use relative /api (vite preview/static cannot POST /api → 405). Set VITE_API_URL on the frontend service and redeploy.`
+        );
+      }
+    },
+  };
+}
+
 function demoFolderPlugin() {
   return {
     name: 'visiarise-demo-folder',
@@ -65,6 +83,8 @@ function demoFolderPlugin() {
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  /** Production API origin for `fetch`; must be set on the frontend Railway service (not only in a local .env). */
+  const viteApiUrl = (process.env.VITE_API_URL ?? env.VITE_API_URL ?? '').trim();
   /**
    * Prefer `VITE_DEV_API_ORIGIN` (e.g. http://127.0.0.1:5001) — do not use generic `PORT` here;
    * root `.env` often sets PORT for the API server and it is easy to confuse with other tooling.
@@ -73,9 +93,16 @@ export default defineConfig(({mode}) => {
     env.VITE_DEV_API_ORIGIN ||
     `http://127.0.0.1:${env.VITE_BACKEND_PORT || '5001'}`;
   return {
-    plugins: [apiProxyLogPlugin(apiTarget), demoFolderPlugin(), react(), tailwindcss()],
+    plugins: [
+      buildApiUrlPlugin(viteApiUrl),
+      apiProxyLogPlugin(apiTarget),
+      demoFolderPlugin(),
+      react(),
+      tailwindcss(),
+    ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      'import.meta.env.VITE_API_URL': JSON.stringify(viteApiUrl),
     },
     resolve: {
       dedupe: ['three'],

@@ -1,7 +1,10 @@
-const rawBase =
-  typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL != null
-    ? String(import.meta.env.VITE_API_URL)
-    : '';
+const rawBase = (() => {
+  const v =
+    typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL != null
+      ? String(import.meta.env.VITE_API_URL)
+      : '';
+  return v.trim();
+})();
 
 /** In dev, empty string uses Vite proxy `/api` → backend. */
 export function apiUrl(path: string): string {

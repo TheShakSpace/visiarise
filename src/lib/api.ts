@@ -3,6 +3,12 @@ const rawBase =
     ? String(import.meta.env.VITE_API_URL)
     : '';
 
+if (typeof import.meta !== 'undefined' && import.meta.env.PROD && !rawBase) {
+  console.warn(
+    '[VisiARise] VITE_API_URL was empty at build time. Set it on your frontend host (e.g. Railway) so /api requests reach the backend.'
+  );
+}
+
 /** In dev, empty string uses Vite proxy `/api` → backend. */
 export function apiUrl(path: string): string {
   const p = path.startsWith('/') ? path : `/${path}`;

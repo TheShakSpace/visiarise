@@ -51,6 +51,11 @@ export default function MeshyModelViewer({ src, token, className }: Props) {
         });
         if (!res.ok) {
           const t = await res.text();
+          if (res.status === 405) {
+            throw new Error(
+              'Model proxy got 405 — the request hit the static site, not the API. Set VITE_API_URL to your backend URL on the frontend service and redeploy.'
+            );
+          }
           throw new Error(t || res.statusText);
         }
         const blob = await res.blob();

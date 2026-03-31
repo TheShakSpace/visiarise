@@ -1,4 +1,6 @@
-require('dotenv').config();
+const path = require('path');
+// Always load backend/.env — not cwd — so `node backend/server.js` from repo root still uses Atlas/JWT from this folder.
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const connectToMongo = require('./db');
 const createApp = require('./createApp');
 

@@ -111,7 +111,9 @@ export default defineConfig(({mode}) => {
       },
     },
     optimizeDeps: {
-      include: ['three', '@react-three/fiber', '@react-three/drei', '@google/model-viewer'],
+      include: ['three', '@react-three/fiber', '@react-three/drei'],
+      // Pre-bundling @google/model-viewer often triggers ERR_OPTIMIZE_DEPS_PROCESSING_ERROR → HTTP 504 on react deps.
+      exclude: ['@google/model-viewer'],
     },
     build: {
       rollupOptions: {
